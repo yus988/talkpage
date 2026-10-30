@@ -1,0 +1,8 @@
+__pycache__/
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+# state written when the sample is served inside the clone
+*.talk.json

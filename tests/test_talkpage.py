@@ -1,4 +1,4 @@
-"""Tests of talkpage.py: the store, the HTTP routes and the wait / reply commands. python -m unittest test_talkpage"""
+"""Tests of talkpage: the store, the HTTP routes and the wait / reply commands. python -m unittest discover tests"""
 import json
 import os
 import shutil
@@ -11,9 +11,11 @@ import unittest
 import urllib.error
 import urllib.request
 
-import talkpage as tp
+SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src')
+sys.path.insert(0, SRC)     # run from a clone without installing
+import talkpage as tp  # noqa: E402
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+ENV = dict(os.environ, PYTHONPATH=os.pathsep.join([SRC, os.environ.get('PYTHONPATH', '')]))
 OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
@@ -125,7 +127,7 @@ class HttpTest(unittest.TestCase):
             return e.code, json.loads(e.read() or b'{}')
 
     def cli(self, *args, **kw):
-        return subprocess.run([sys.executable, os.path.join(HERE, 'talkpage.py'), '--port', str(self.port)] + list(args),
+        return subprocess.run([sys.executable, '-m', 'talkpage', '--port', str(self.port)] + list(args), env=ENV,
                               capture_output=True, text=True, encoding='utf-8', timeout=30, **kw)
 
     def test_1_static_and_client(self):
@@ -137,7 +139,11 @@ class HttpTest(unittest.TestCase):
         self.assertEqual(self.req('/notes/r1/../../secret.txt')[0], 404)
         self.assertEqual(self.req('/%2e%2e/x.html')[0], 404)
         self.assertEqual(self.req('/.git/config')[0], 404)
-        self.assertEqual(self.req('/_talk/talkpage.py')[0], 404)
+        self.assertEqual(self.req('/_talk/__init__.py')[0], 404)
+        code, body = self.req('/_talk/')
+        self.assertIn(b'<html lang="en">', body)                    # the index page in the server's language
+        self.assertIn(b'Only pages with a state are listed', body)
+        self.assertEqual(self.req('/_talk/api/info')[1]['lang'], 'en')
 
     def test_2_guards(self):
         self.assertEqual(self.req('/_talk/api/info', headers={'Host': 'evil.example:%d' % self.port})[0], 403)
@@ -188,9 +194,12 @@ class HttpTest(unittest.TestCase):
 
     def test_3_flow_with_wait(self):
         page = 'notes/r1/index.html'
-        waiter = subprocess.Popen([sys.executable, os.path.join(HERE, 'talkpage.py'), '--port', str(self.port), 'wait',
-                                   '--settle', '0.5'], stdout=subprocess.PIPE, text=True, encoding='utf-8')
-        time.sleep(0.8)
+        waiter = subprocess.Popen([sys.executable, '-m', 'talkpage', '--port', str(self.port), 'wait',
+                                   '--settle', '0.5'], env=ENV, stdout=subprocess.PIPE, text=True, encoding='utf-8')
+        for _ in range(50):        # the waiter starts a new python: up to 5 s on a loaded machine
+            if self.req('/_talk/api/state?page=' + page)[1]['presence'] == 'listening':
+                break
+            time.sleep(0.1)
         self.assertEqual(self.req('/_talk/api/state?page=' + page)[1]['presence'], 'listening')
         code, it = self.req('/_talk/api/user', {'page': page, 'id': 'A1', 'title': 'A1 a', 'status': 'NG',
                                                 'comment': '鳴らない\n2 行目'}, headers={'Origin': 'http://127.0.0.1:%d' % self.port})
