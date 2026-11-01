@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """talkpage: local web pages where the user marks items and writes comments, and a coding agent is woken to answer.
 
-  python talkpage.py serve <root> [--port 8190] [--open PAGE] [--lang en|ja]
-  python talkpage.py wait  [--page P] [--settle 4]
-  python talkpage.py reply --page P --id ID [--status S] [--text T | --text - | --file F] [--fields JSON]
+  python talkpage.py serve <root> [--port 8190] [--open PAGE] [--lang en|ja] [--name NAME.localhost] [--reports]
+  python talkpage.py wait  [--page P] [--settle 4] [--json]
+  python talkpage.py reply --page P --id ID [--status S] [--text T | --text - | --file F] [--fields JSON] [--summary S]
   python talkpage.py ack   [--page P] [--id ID ...]
   python talkpage.py show  [--page P]
+  python talkpage.py reports [list | owner THEME NAME ID | read THEME... | read all | unread THEME... | open [--owner S]]
 
 serve: <root> holds the pages; the state of <dir>/<name>.html is kept beside it in <dir>/<name>.talk.json. Only
 127.0.0.1 is served. wait: blocks until the user acts on a page, prints what they did and exits; an agent runs it in
@@ -14,6 +15,10 @@ shows on the page). ack: mark what was printed as read without replying. show: a
 P is a page path under the root or a unique part of one. --port defaults to $TALKPAGE_PORT or 8190. --lang: the
 language of the server's own index page (default: $TALKPAGE_LANG, else ja for a Japanese OS, else en); talkpage.js
 follows the <html lang> of each page. The page side is talkpage.js / talkpage.css (served at /_talk/); see README.md.
+--name (default $TALKPAGE_NAME): also serve the pages at http://NAME/ (a second listener on 127.0.0.1:80 when it can
+be had; browsers send *.localhost to this PC). --reports: the root holds reports, <theme>/<YYYYMMDD-HHMM-rN>/index.html
+or <theme>/index.html; the server lists them (/_talk/api/reports, and / when the root has no index.html) and adds
+talkpage.js to every page it serves. reports: list them, set a theme's owner session (owners.json), mark them read.
 """
 import argparse
 import html
@@ -42,12 +47,27 @@ TYPES = {'.html': 'text/html', '.htm': 'text/html', '.css': 'text/css', '.js': '
          '.webp': 'image/webp', '.gif': 'image/gif', '.ico': 'image/x-icon', '.pdf': 'application/pdf',
          '.mp4': 'video/mp4', '.woff2': 'font/woff2'}
 LANGS = ('en', 'ja')
+NAME_RE = re.compile(r'^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+localhost$')
+ROUND_RE = re.compile(r'^\d{8}-\d{4}-r\d+(-[^/]+)?$')      # a round <theme>/<round>/index.html (also r27-marks)
+TITLE_RE = re.compile(rb'<title[^>]*>(.*?)</title', re.I | re.S)
+LANG_RE = re.compile(rb'<html[^>]*?\slang\s*=\s*["\']?([A-Za-z-]+)', re.I)
+READ = ('読んだ', 'Read')                                       # the statuses of the item `read` that mean read
+OPEN_SECONDS = 90                                               # a page asked with open=1 this recently is open
+# added to the report pages the server hands out (--reports); fixed, nothing of the page or the user goes in
+INJECT = b'<link rel="stylesheet" href="/_talk/talkpage.css"><script src="/_talk/talkpage.js" defer data-talk-report></script>'
 # the index page (/_talk/)
 LISTING = {
     'en': {'unread': ' — unread by the agent: %d', 'meta': 'root: %s · agent: %s', 'none': '(none yet)',
            'note': 'Only pages with a state are listed. Open the others by their path under the root.'},
     'ja': {'unread': ' — エージェント未読 %d', 'meta': 'root: %s ・ エージェント: %s', 'none': '（まだ無い）',
            'note': '状態のあるページだけを並べる。ほかのページは root からのパスで開く。'},
+}
+# the list of reports (/ under --reports when the root has no index.html)
+REPORTS = {
+    'en': {'title': 'Reports', 'unread': 'unread', 'comments': 'comments: %s', 'none': '(no reports yet)',
+           'no_owner': 'no owner', 'meta': 'root: %s · all pages with a state: <a href="/_talk/">/_talk/</a>'},
+    'ja': {'title': 'レポートの一覧', 'unread': '未読', 'comments': 'コメント %s', 'none': '（まだ無い）',
+           'no_owner': '担当なし', 'meta': 'root: %s ・ 状態のあるページの一覧: <a href="/_talk/">/_talk/</a>'},
 }
 FAVICON = ("<link rel=\"icon\" href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>"
            "<text y='.9em' font-size='90'>💬</text></svg>\">")
@@ -73,6 +93,58 @@ def default_lang(env_name='TALKPAGE_LANG'):
         except (AttributeError, OSError):
             pass
     return 'en'
+
+
+def check_name(name):
+    """The name of --name in lower case, or SystemExit: only *.localhost, which browsers send to this PC."""
+    n = (name or '').strip().lower()
+    if not NAME_RE.match(n):
+        raise SystemExit('talkpage: --name must end with .localhost (e.g. notes.localhost), which every browser sends '
+                         'to this PC without a hosts entry: %s' % name)
+    return n
+
+
+def own_origins(port, name=None):
+    """The origins of this server's pages on one listener: 127.0.0.1, localhost and the --name, without :80."""
+    suffix = '' if port == 80 else ':%d' % port
+    return tuple('http://%s%s' % (h, suffix) for h in ('127.0.0.1', 'localhost') + ((name,) if name else ()))
+
+
+def head(path, n=65536):
+    """The first n bytes of a file, or b''."""
+    try:
+        with open(path, 'rb') as f:
+            return f.read(n)
+    except OSError:
+        return b''
+
+
+def page_title(data):
+    m = TITLE_RE.search(data)
+    return ' '.join(html.unescape(m.group(1).decode('utf-8', 'replace')).split())[:200] if m else ''
+
+
+def page_lang(data):
+    m = LANG_RE.search(data)
+    return m.group(1).decode('ascii').lower() if m else ''
+
+
+def report_key(page):
+    """The theme key of a page under --reports: the folder above its round (<theme>/<round>/...), the folder of a
+    single index.html, or the path of any other single page. owners.json is keyed by it."""
+    parts = page.split('/')
+    for i in range(len(parts) - 2, 0, -1):
+        if ROUND_RE.match(parts[i]):
+            return '/'.join(parts[:i])
+    return '/'.join(parts[:-1]) if parts[-1] == 'index.html' and len(parts) > 1 else page
+
+
+def inject(data):
+    """The client added before the last </body> (else at the end) of a page that does not load talkpage.js itself."""
+    if b'/_talk/talkpage.js' in data:
+        return data
+    i = data.lower().rfind(b'</body>')
+    return data + INJECT if i < 0 else data[:i] + INJECT + data[i:]
 
 
 def stamp():
@@ -255,10 +327,14 @@ class Talk:
     """The stores under one root, the agent's presence, and the /_talk/api/ routes. Another server can host stores
     kept at its own paths (attach) and hand /_talk/api/ requests to get() / post()."""
 
-    def __init__(self, root=None, port=PORT, lang='en'):
+    def __init__(self, root=None, port=PORT, lang='en', name=None, reports=False):
         self.root = os.path.realpath(root) if root else None
         self.port = port
         self.lang = lang if lang in LANGS else 'en'      # of the index page; the pages carry their own <html lang>
+        self.name = name or None                         # --name, checked by check_name()
+        self.on80 = False                                # a second listener serves the name on port 80
+        self.report_mode = bool(reports and self.root)
+        self.viewed = {}                                 # page -> when a page last asked for its state with open=1
         self.cond = threading.Condition()
         self.stores = {}
         self.listeners = 0                     # `wait` requests in progress
@@ -268,6 +344,66 @@ class Talk:
         if self.root:
             self.scan()
         threading.Thread(target=self._watch_presence, daemon=True).start()
+
+    @property
+    def url(self):
+        """The address the user reads: http://NAME/ when port 80 serves it, else http://NAME:<port>/ or 127.0.0.1."""
+        if self.name:
+            return 'http://%s/' % self.name if self.on80 or self.port == 80 else 'http://%s:%d/' % (self.name, self.port)
+        return 'http://127.0.0.1:%d/' % self.port
+
+    def owners(self):
+        """{theme: {name, id}} of <root>/owners.json (written by `talkpage reports owner`), or {}."""
+        try:
+            with open(os.path.join(self.root, 'owners.json'), encoding='utf-8') as f:
+                d = json.load(f)
+        except (OSError, ValueError):
+            return {}
+        return {k: v for k, v in d.items() if isinstance(v, dict)} if isinstance(d, dict) else {}
+
+    def reports(self):
+        """The reports under the root: the last round of each theme with rounds, and the single pages, newest first."""
+        found = []                             # (theme key, round, page, file, time)
+        for d, dirs, files in os.walk(self.root):
+            dirs[:] = sorted(x for x in dirs if not x.startswith(('.', '_')) and x not in SKIP_DIRS)
+            rel = os.path.relpath(d, self.root).replace('\\', '/')
+            rel = '' if rel == '.' else rel
+            rounds = [x for x in dirs if ROUND_RE.match(x) and os.path.isfile(os.path.join(d, x, 'index.html'))]
+            if rounds and rel:                 # a theme: its last round; the earlier ones are linked from its index
+                r = max(rounds, key=natural)
+                found.append((rel, r, '%s/%s/index.html' % (rel, r), os.path.join(d, r, 'index.html'),
+                              '%s-%s-%s %s:%s' % (r[:4], r[4:6], r[6:8], r[9:11], r[11:13])))
+            dirs[:] = [x for x in dirs if not ROUND_RE.match(x)]     # the other files of a round are not rows
+            for f in sorted(files):
+                if not f.lower().endswith(('.html', '.htm')) or f == 'index.html' and (rounds or not rel):
+                    continue                   # the index of the rounds, and the root's own index
+                page = rel + '/' + f if rel else f
+                try:
+                    t = time.strftime('%Y-%m-%d %H:%M', time.localtime(os.path.getmtime(os.path.join(d, f))))
+                except OSError:
+                    continue
+                found.append((report_key(page), '', page, os.path.join(d, f), t))
+        owners = self.owners()
+        rows = []
+        with self.cond:
+            for theme, r, page, full, t in found:
+                s = self.stores.get(page)
+                if s is None and os.path.isfile(os.path.splitext(full)[0] + '.talk.json'):
+                    try:
+                        s = self.store(page)
+                    except (OSError, ValueError):
+                        s = None
+                elif s is not None:
+                    s.fresh()
+                read = s.data['items'].get('read', {}).get('status', '') if s else ''
+                comments = [x['id'] for x in s.waiting_items() if any('text' in m for m in x['new'])] if s else []
+                owner = owners.get(theme, {}).get('name', '')
+                rows.append({'page': page, 'theme': theme, 'round': r, 'title': page_title(head(full)) or theme,
+                             'owner': owner if isinstance(owner, str) else '', 'tracked': bool(r),
+                             'status': read if r else '-', 'read': bool(r) and read in READ,
+                             'comments': comments, 'time': t})
+        rows.sort(key=lambda x: x['time'], reverse=True)
+        return {'root': self.root.replace('\\', '/'), 'url': self.url, 'rows': rows}
 
     def scan(self):
         for d, dirs, files in os.walk(self.root):
@@ -358,13 +494,22 @@ class Talk:
             return (q.get(k) or [d])[0]
         if path == '/_talk/api/info':
             with self.cond:
+                now = time.time()
                 return 200, dump({'tool': 'talkpage', 'root': self.root and self.root.replace('\\', '/'),
                                   'port': self.port, 'lang': self.lang, 'presence': self.presence(),
+                                  'name': self.name or '', 'url': self.url,
+                                  'open': sorted(p for p, t in self.viewed.items() if now - t < OPEN_SECONDS),
                                   'pages': sorted(self.stores)})
+        if path == '/_talk/api/reports':
+            if not self.report_mode:
+                return 404, dump({'error': 'the server runs without --reports'})
+            return 200, dump(self.reports())
         if path == '/_talk/api/state':
             rev, pres, wait = int(one('rev', -1)), one('presence'), min(float(one('wait', 0)), 55)
             with self.cond:
                 s = self.store(one('page'), loose=True)
+                if one('open') == '1':
+                    self.viewed[s.page] = time.time()
                 if wait > 0:
                     self.cond.wait_for(lambda: s.data['rev'] != rev or pres is not None and self.presence() != pres,
                                        wait)
@@ -396,8 +541,12 @@ class Talk:
                         s = self.stores[x['page']]
                         s.taken[x['id']] = s.data['items'][x['id']]['user_rev']
                     self.taken_at = time.time()
+                if self.report_mode:                   # who the comment is for: the theme's owner session
+                    owners = self.owners()
+                    items = [dict(x, theme=report_key(x['page']), owner=owners.get(report_key(x['page'])))
+                             for x in items]
                 return dump({'now': time.time(), 'last_user_at': self.last_user_at, 'presence': self.presence(),
-                             'url': 'http://127.0.0.1:%d/' % self.port, 'items': items})
+                             'url': self.url, 'items': items})
             finally:
                 if listen:
                     self.listeners -= 1
@@ -455,6 +604,26 @@ class Talk:
                 % (self.lang, FAVICON, m['meta'] % (root, self.presence()), ''.join(rows) or '<li>%s</li>' % m['none'],
                    m['note'])).encode('utf-8')
 
+    def report_listing(self):
+        """The list of reports at / (--reports, the root has no index.html); every value is escaped."""
+        m = REPORTS[self.lang]
+        rows = []
+        for x in self.reports()['rows']:
+            meta = ' · '.join(html.escape(v) for v in (x['theme'], x['round'], x['owner'] or m['no_owner'], x['time'])
+                              if v)
+            mark = ' <b>%s</b>' % m['unread'] if x['tracked'] and not x['read'] else ''
+            if x['comments']:
+                mark += ' <span class="c">%s</span>' % html.escape(m['comments'] % ', '.join(x['comments']))
+            rows.append('<li><a href="/%s">%s</a>%s<br><span class="m">%s</span></li>'
+                        % (html.escape(urllib.parse.quote(x['page'])), html.escape(x['title']), mark, meta))
+        return ('<!doctype html><html lang="%s"><head><meta charset="utf-8"><title>%s</title>%s'
+                '<style>body{font:15px/1.6 system-ui,sans-serif;margin:24px 16px;max-width:860px}li{margin:6px 0}'
+                '.m{color:#666;font-size:13px}.c{color:#b45309;font-size:13px}</style></head>'
+                '<body data-talk-listing><h1>%s</h1>'                      # no file behind it: no state, no items
+                '<p class="m">%s</p><ul>%s</ul></body></html>'
+                % (self.lang, html.escape(m['title']), FAVICON, html.escape(m['title']),
+                   m['meta'] % html.escape(self.root), ''.join(rows) or '<li>%s</li>' % m['none'])).encode('utf-8')
+
 
 def dump(obj):
     return json.dumps(obj, ensure_ascii=False).encode('utf-8')
@@ -493,8 +662,7 @@ class Handler(BaseHTTPRequestHandler):
         POST, other sites' fetches): ours or nothing. Sec-Fetch-Site (also <img>, <script>, forms): another site may
         open a page by a link and nothing else. What acts needs our Origin, or a request of our page (same-origin,
         or our Referer in a browser without Sec-Fetch-Site); clients without a browser send Origin (call())."""
-        port = self.server.server_address[1]
-        own = ('http://127.0.0.1:%d' % port, 'http://localhost:%d' % port)
+        own = own_origins(self.server.server_address[1], self.talk.name)
         h = self.headers
         if (h.get('Host') or '').lower() not in [o[len('http://'):] for o in own]:
             return False
@@ -559,13 +727,18 @@ class Handler(BaseHTTPRequestHandler):
             if not raw.endswith('/'):
                 return self._send(301, b'', 'text/plain', {'Location': raw + '/'})
             if not os.path.isfile(os.path.join(full, 'index.html')) and full == root:
+                if self.talk.report_mode:
+                    return self._send(200, inject(self.talk.report_listing()), 'text/html')
                 return self._send(200, self.talk.listing(), 'text/html')
             full = os.path.join(full, 'index.html')
         ctype = TYPES.get(os.path.splitext(full)[1].lower())
         if not ctype or not os.path.isfile(full):
             return self._send(404, {'error': 'not found'})
         with open(full, 'rb') as f:
-            self._send(200, f.read(), ctype)
+            data = f.read()
+        if self.talk.report_mode and ctype == 'text/html':
+            data = inject(data)                # in the response only; the file stays as it is
+        self._send(200, data, ctype)
 
     def _post(self):
         if not (self.headers.get('Content-Type') or '').lower().startswith('application/json'):
@@ -616,15 +789,26 @@ def cmd_serve(a):
     root = os.path.realpath(a.root)
     if not os.path.isdir(root):
         raise SystemExit('talkpage: not a folder: %s' % a.root)
-    talk = Talk(root, a.port, a.lang or default_lang('TALKPAGE_LANG'))
+    name = check_name(a.name) if a.name else None
+    talk = Talk(root, a.port, a.lang or default_lang('TALKPAGE_LANG'), name, a.reports)
     Handler.talk = talk
     try:
         srv = Server(('127.0.0.1', a.port), Handler)
     except OSError as e:
         raise SystemExit('talkpage: cannot listen on 127.0.0.1:%d (%s). Another talkpage? '
                          'http://127.0.0.1:%d/_talk/api/info tells its root.' % (a.port, e, a.port))
-    url = 'http://127.0.0.1:%d/' % a.port
-    print('talkpage: %s at %s (%d pages with a state). Ctrl-C to stop.' % (root, url, len(talk.stores)), flush=True)
+    srv80 = None
+    if name and a.port != 80:                  # the same pages at http://NAME/ (browsers do not write :80)
+        try:
+            srv80 = Server(('127.0.0.1', 80), Handler)
+            threading.Thread(target=srv80.serve_forever, kwargs={'poll_interval': 0.2}, daemon=True).start()
+            talk.on80 = True
+        except OSError as e:
+            print('talkpage: port 80 is not free (%s); the pages are at http://%s:%d/' % (e, name, a.port),
+                  file=sys.stderr, flush=True)
+    url = talk.url
+    print('talkpage: %s at %s (%d pages with a state%s). Ctrl-C to stop.'
+          % (root, url, len(talk.stores), ', reports' if talk.report_mode else ''), flush=True)
     if a.open:
         page = os.path.relpath(os.path.realpath(a.open), root) if os.path.isabs(a.open) else a.open
         p, _ = talk.page_file(page)
@@ -635,6 +819,9 @@ def cmd_serve(a):
         pass
     finally:
         srv.server_close()
+        if srv80:
+            srv80.shutdown()
+            srv80.server_close()
 
 
 def me(a, sub):
@@ -685,7 +872,11 @@ def cmd_wait(a):
         except (urllib.error.URLError, OSError):                     # the server is not up yet, or restarting
             time.sleep(2)
             continue
-        print_pending(a, d, rest)
+        if a.json:                                                   # for an agent that hands the items on as they are
+            print(json.dumps({'url': d['url'], 'items': d['items'],
+                              'also_waiting': [{'page': x['page'], 'id': x['id']} for x in rest]}, ensure_ascii=False))
+        else:
+            print_pending(a, d, rest)
         return
 
 
@@ -702,6 +893,8 @@ def cmd_reply(a):
             fields = json.load(f)
     elif a.fields:
         fields = json.loads(a.fields)
+    if a.summary is not None:                                       # a 2-3 line summary of the whole thread
+        fields = dict(fields or {}, summary=a.summary.strip())
     body = {'page': a.page, 'id': a.id, 'reply': text, 'status': a.status, 'fields': fields}
     r = call(a, '/_talk/api/agent', body)
     print('talkpage: %s  %s  [%s]  %d message(s)' % (r['page'], r['id'], r['status'] or '-',
@@ -728,6 +921,96 @@ def cmd_show(a):
                 print('    last %s %s: %s' % (m['who'], m.get('time', '')[5:16], m['text'].splitlines()[0][:100]))
 
 
+def reports_data(a):
+    """(info, /_talk/api/reports) of a server run with --reports, or SystemExit with the reason."""
+    try:
+        info = call(a, '/_talk/api/info')
+        return info, call(a, '/_talk/api/reports')
+    except (urllib.error.URLError, OSError) as e:
+        raise SystemExit('talkpage: no server on 127.0.0.1:%d (%s); start it with: talkpage serve <root> --reports'
+                         % (a.port, getattr(e, 'reason', e)))
+
+
+def report_line(x, opened):
+    line = '\t'.join((x['theme'], x['round'] or '-', x['owner'] or '-', x['title']))
+    if x['comments']:
+        line += ' [comments: %s]' % ','.join(x['comments'])
+    return line + (' [open]' if x['page'] in opened else '')
+
+
+def cmd_reports(a):
+    info, d = reports_data(a)
+    rows, opened = d['rows'], set(info.get('open') or [])
+    by_theme = {x['theme']: x for x in rows}
+    oldest = sorted(rows, key=lambda x: x['time'])
+    act, args = a.action, a.args
+
+    def tracked(names):
+        if not names:
+            raise SystemExit('talkpage: reports %s: name one or more themes (or all)' % act)
+        if names == ['all']:
+            return [x for x in oldest if x['tracked']]
+        bad = [n for n in names if n not in by_theme or not by_theme[n]['tracked']]
+        if bad:
+            raise SystemExit('talkpage: not a theme with rounds: %s' % ', '.join(bad))
+        return [by_theme[n] for n in names]
+
+    if act == 'list':
+        if args:
+            raise SystemExit('talkpage: reports list takes no arguments')
+        groups = (('unread', [x for x in oldest if x['tracked'] and not x['read']]),
+                  ('read', [x for x in rows if x['tracked'] and x['read']]),
+                  ('pages', [x for x in rows if not x['tracked']]))
+        for label, xs in groups:
+            print('== %s: %d' % (label, len(xs)))
+            for x in xs:
+                print(report_line(x, opened))
+    elif act == 'owner':
+        if len(args) != 3:
+            raise SystemExit('talkpage: reports owner <theme> <name> <id>')
+        theme, name, sid = args
+        if theme not in by_theme:
+            raise SystemExit('talkpage: no such theme: %s' % theme)
+        path = os.path.join(d['root'], 'owners.json')
+        owners = {}
+        if os.path.isfile(path):
+            with open(path, encoding='utf-8') as f:
+                try:
+                    owners = json.load(f)
+                except ValueError as e:
+                    raise SystemExit('talkpage: %s is not JSON (%s); fix or remove it' % (path, e))
+            if not isinstance(owners, dict):
+                raise SystemExit('talkpage: %s is not a JSON object' % path)
+        owners[theme] = {'name': name, 'id': sid}
+        tmp = path + '.tmp'
+        with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
+            json.dump(owners, f, ensure_ascii=False, indent=1, sort_keys=True)
+            f.write('\n')
+        os.replace(tmp, path)
+        print('talkpage: owner of %s: %s (%s)' % (theme, name, sid))
+    elif act in ('read', 'unread'):
+        for x in tracked(args):
+            status = ''
+            if act == 'read':                                       # in the page's language, like its buttons
+                lang = page_lang(head(os.path.join(d['root'], *x['page'].split('/'))))
+                status = READ[0] if lang.startswith('ja') else READ[1]
+            call(a, '/_talk/api/agent', {'page': x['page'], 'id': 'read', 'status': status})
+            print('talkpage: %s  [%s]' % (x['page'], status or '-'))
+    elif act == 'open':
+        if args:
+            raise SystemExit('talkpage: reports open [--owner S]')
+        if a.owner:
+            xs = [x for x in oldest if a.owner in x['owner']]
+        else:
+            xs = [x for x in oldest if x['tracked'] and not x['read']]
+        xs = [x for x in xs if x['page'] not in opened]             # already open in a tab
+        for x in xs:
+            webbrowser.open(info['url'] + urllib.parse.quote(x['page']))
+            print('talkpage: opened ' + x['page'])
+        if not xs:
+            print('talkpage: nothing to open')
+
+
 def main():
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8')
@@ -739,9 +1022,14 @@ def main():
     s.add_argument('--open', help='open this page (path under the root, or the file) in the default browser')
     s.add_argument('--lang', choices=LANGS,
                    help='language of the index page (default: $TALKPAGE_LANG, else ja for a Japanese OS, else en)')
+    s.add_argument('--name', default=os.environ.get('TALKPAGE_NAME') or None,
+                   help='also serve at http://NAME/, a name ending in .localhost (default: $TALKPAGE_NAME)')
+    s.add_argument('--reports', action='store_true',
+                   help='the root holds reports: list them at / and add talkpage.js to the pages')
     s = sub.add_parser('wait', help='block until the user acts, print it, exit')
     s.add_argument('--page', help='only this page (path or a unique part of it)')
     s.add_argument('--settle', type=float, default=4.0, help='seconds without new clicks before printing (default 4)')
+    s.add_argument('--json', action='store_true', help='print one JSON object {url, items, also_waiting} instead')
     s = sub.add_parser('reply', help='answer an item')
     s.add_argument('--page', required=True)
     s.add_argument('--id', required=True)
@@ -749,15 +1037,21 @@ def main():
     s.add_argument('--text', help='the reply; "-" reads it from stdin (UTF-8)')
     s.add_argument('--file', help='read the reply from this UTF-8 file')
     s.add_argument('--fields', help='JSON object of extra item fields to store, or @file with that JSON (UTF-8)')
+    s.add_argument('--summary', help='a 2-3 line summary of the thread, shown on the page (fields.summary)')
     s = sub.add_parser('ack', help='mark what waits as read without replying')
     s.add_argument('--page')
     s.add_argument('--id', action='append', help='only these items (repeat)')
     s = sub.add_parser('show', help='all items of a page')
     s.add_argument('--page')
+    s = sub.add_parser('reports', help='the reports of a server run with --reports')
+    s.add_argument('action', nargs='?', default='list', choices=('list', 'owner', 'read', 'unread', 'open'))
+    s.add_argument('args', nargs='*')
+    s.add_argument('--owner', help='open: the pages of the themes whose owner contains this')
     for sp in sub.choices.values():                                 # --port also after the subcommand
         sp.add_argument('--port', type=int, default=argparse.SUPPRESS)
     a = p.parse_args()
-    {'serve': cmd_serve, 'wait': cmd_wait, 'reply': cmd_reply, 'ack': cmd_ack, 'show': cmd_show}[a.cmd](a)
+    {'serve': cmd_serve, 'wait': cmd_wait, 'reply': cmd_reply, 'ack': cmd_ack, 'show': cmd_show,
+     'reports': cmd_reports}[a.cmd](a)
 
 
 if __name__ == '__main__':

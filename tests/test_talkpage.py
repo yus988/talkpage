@@ -134,6 +134,8 @@ class HttpTest(unittest.TestCase):
         code, body = self.req('/notes/r1/')
         self.assertEqual(code, 200)
         self.assertIn(b'data-talk', body)
+        self.assertNotIn(b'data-talk-report', body)                 # nothing is added without --reports
+        self.assertEqual(self.req('/_talk/api/reports')[0], 404)
         self.assertEqual(self.req('/_talk/talkpage.js')[0], 200)
         self.assertEqual(self.req('/secret.txt')[0], 200)
         self.assertEqual(self.req('/notes/r1/../../secret.txt')[0], 404)
@@ -238,6 +240,172 @@ class HttpTest(unittest.TestCase):
         self.assertIn('A1, A2', a.stdout)
         self.assertEqual(self.req('/_talk/api/pending')[1]['items'], [])
         self.assertIn('[NG]', self.cli('show', '--page', 'r1').stdout)
+
+
+def write(root, path, text):
+    full = os.path.join(root, *path.split('/'))
+    os.makedirs(os.path.dirname(full), exist_ok=True)
+    with open(full, 'w', encoding='utf-8', newline='\n') as f:
+        f.write(text)
+    return full
+
+
+class ReportsTest(unittest.TestCase):
+    """serve --reports --name x.localhost: the list of reports, the client added to the pages, the commands."""
+    R3 = 'motor/20261031-1500-r3/index.html'
+    FIT = 'cad/widget/case-fit/20261025-0042-r1/index.html'
+
+    @classmethod
+    def setUpClass(cls):
+        cls.root = tempfile.mkdtemp()
+        w = lambda p, t: write(cls.root, p, t)      # noqa: E731
+        w('motor/index.html', '<title>rounds of motor</title>')
+        w('motor/20261030-1000-r2/index.html', '<html lang="ja"><title>r2</title>')
+        w(cls.R3, '<html lang="ja"><head><title>モーター &amp;\n  比較 r3</title></head><body>本文</body></html>')
+        w('motor/20261031-1500-r3/extra.html', '<title>extra</title>')
+        w(cls.FIT, '<html lang="en"><title>case fit</title><body>text</body>')
+        cls.single = w('review/index.html', '<html lang="ja"><title>&lt;b&gt;review</title><BODY>x</BODY></html>')
+        w('survey-20261016.html', '<title>survey</title>no body')
+        w('fusion/bobbin.html', '<title>bobbin</title>')
+        w('own/index.html', '<body><script src="/_talk/talkpage.js"></script></body>')
+        w('_private/x.html', '<title>private</title>')
+        w('.hidden/y.html', '<title>hidden</title>')
+        w('style.css', 'body{}')
+        w('data.json', '{"a": "</body>"}')
+        w('owners.json', json.dumps({'motor': {'name': 'モーター変更検討', 'id': 's1'}}, ensure_ascii=False))
+        for i, p in enumerate(('review/index.html', 'survey-20261016.html', 'fusion/bobbin.html', 'own/index.html')):
+            t = time.mktime((2026, 10, 28, 11, i, 0, 0, 0, -1))
+            os.utime(os.path.join(cls.root, *p.split('/')), (t, t))
+        cls.talk = tp.Talk(cls.root, 0, 'ja', name='x.localhost', reports=True)
+
+        class H(tp.Handler):
+            talk = cls.talk
+        cls.srv = tp.Server(('127.0.0.1', 0), H)
+        cls.port = cls.talk.port = cls.srv.server_address[1]
+        threading.Thread(target=cls.srv.serve_forever, kwargs={'poll_interval': 0.05}, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+        cls.srv.server_close()
+        shutil.rmtree(cls.root)
+
+    req = HttpTest.req
+    cli = HttpTest.cli
+
+    def rows(self):
+        return {x['page']: x for x in self.req('/_talk/api/reports')[1]['rows']}
+
+    def test_names(self):
+        self.assertEqual(tp.own_origins(80, 'x.localhost'), ('http://127.0.0.1', 'http://localhost', 'http://x.localhost'))
+        self.assertEqual(tp.own_origins(8190)[1], 'http://localhost:8190')
+        self.assertEqual(tp.check_name('Notes.Localhost'), 'notes.localhost')
+        for bad in ('notes.example', 'localhost', 'a..localhost', 'x.localhost:80'):
+            with self.assertRaises(SystemExit):
+                tp.check_name(bad)
+        named = 'x.localhost:%d' % self.port
+        user = {'page': 'review/index.html', 'id': 'N1', 'status': 'OK', 'notify': False}
+        self.assertEqual(self.req('/_talk/api/user', user, {'Host': named, 'Origin': 'http://' + named})[0], 200)
+        self.assertEqual(self.req('/review/', headers={'Host': named, 'Origin': None})[0], 200)
+        self.assertEqual(self.req('/_talk/api/info', headers={'Host': 'y.localhost:%d' % self.port})[0], 403)
+        # another name's or another port's Origin (a GET: a refused POST body can reset the connection on Windows)
+        self.assertEqual(self.req('/_talk/api/info', headers={'Origin': 'http://y.localhost:%d' % self.port})[0], 403)
+        self.assertEqual(self.req('/_talk/api/info', headers={'Origin': 'http://x.localhost'})[0], 403)
+        info = self.req('/_talk/api/info')[1]
+        self.assertEqual((info['name'], info['url']), ('x.localhost', 'http://%s/' % named))
+        self.assertEqual(tp.Talk(None, 8190).url, 'http://127.0.0.1:8190/')
+
+    def test_inject(self):
+        code, body, head = self.req('/review/', info=True)
+        self.assertEqual(body, b'<html lang="ja"><title>&lt;b&gt;review</title><BODY>x' + tp.INJECT + b'</BODY></html>')
+        self.assertEqual(int(head['Content-Length']), len(body))
+        self.assertTrue(self.req('/survey-20261016.html')[1].endswith(b'no body' + tp.INJECT))
+        self.assertEqual(self.req('/own/')[1], b'<body><script src="/_talk/talkpage.js"></script></body>')
+        self.assertEqual(self.req('/style.css')[1], b'body{}')
+        self.assertEqual(self.req('/data.json')[1], {'a': '</body>'})
+        with open(self.single, encoding='utf-8') as f:
+            self.assertNotIn('talkpage', f.read())                  # the file stays as it is
+        self.assertEqual(tp.inject(b'a</body>b</body>'), b'a</body>b' + tp.INJECT + b'</body>')
+
+    def test_list(self):
+        rows = self.rows()
+        self.assertEqual(sorted(rows), sorted([self.R3, self.FIT, 'review/index.html', 'survey-20261016.html',
+                                               'fusion/bobbin.html', 'own/index.html']))
+        r3 = rows[self.R3]
+        self.assertEqual((r3['theme'], r3['round'], r3['title'], r3['owner'], r3['tracked'], r3['time']),
+                         ('motor', '20261031-1500-r3', 'モーター & 比較 r3', 'モーター変更検討', True, '2026-10-31 15:00'))
+        self.assertEqual(rows[self.FIT]['theme'], 'cad/widget/case-fit')
+        self.assertEqual((rows['review/index.html']['theme'], rows['review/index.html']['status']), ('review', '-'))
+        self.assertEqual(rows['fusion/bobbin.html']['theme'], 'fusion/bobbin.html')
+        self.assertEqual(rows['own/index.html']['title'], 'own')                  # no <title>: the theme
+        self.assertEqual([x['time'] for x in self.req('/_talk/api/reports')[1]['rows']][:2],
+                         ['2026-10-31 15:00', '2026-10-28 11:03'])                # newest first
+        # unread comments only (a status alone is not one)
+        self.req('/_talk/api/user', {'page': self.R3, 'id': 'C2', 'title': '本文', 'comment': 'なぜ?'})
+        self.req('/_talk/api/user', {'page': self.R3, 'id': 'C1', 'status': 'NG'})
+        self.assertEqual(self.rows()[self.R3]['comments'], ['C2'])
+        self.req('/_talk/api/ack', {'page': self.R3})
+        self.assertEqual(self.rows()[self.R3]['comments'], [])
+        code, body = self.req('/')
+        self.assertIn('&lt;b&gt;review'.encode(), body)                        # escaped
+        self.assertNotIn(b'<b>review', body)
+        self.assertIn(tp.INJECT, body)
+        self.assertIn('レポートの一覧'.encode(), body)
+
+    def test_open_and_summary(self):
+        self.req('/_talk/api/state?page=' + self.FIT + '&open=1')
+        self.assertIn(self.FIT, self.req('/_talk/api/info')[1]['open'])
+        r = self.cli('reply', '--page', self.FIT, '--id', 'C1', '--text', 'ok', '--summary', '  2 行の要約  ',
+                     '--fields', '{"note": "n"}')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        it = self.req('/_talk/api/state?page=' + self.FIT)[1]['items']['C1']
+        self.assertEqual((it['summary'], it['note']), ('2 行の要約', 'n'))
+
+    def test_reports_commands(self):
+        r = self.cli('reports', 'owner', 'cad/widget/case-fit', 'ケース', 'sid-2')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with open(os.path.join(self.root, 'owners.json'), encoding='utf-8') as f:
+            self.assertEqual(json.load(f), {'cad/widget/case-fit': {'name': 'ケース', 'id': 'sid-2'},
+                                            'motor': {'name': 'モーター変更検討', 'id': 's1'}})
+        self.assertIn('no such theme', self.cli('reports', 'owner', 'nothing', 'a', 'b').stderr)
+        r = self.cli('reports', 'read', 'motor', 'cad/widget/case-fit')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rows = self.rows()
+        self.assertEqual((rows[self.R3]['status'], rows[self.R3]['read']), ('読んだ', True))
+        self.assertEqual((rows[self.FIT]['status'], rows[self.FIT]['read']), ('Read', True))
+        self.assertIn('not a theme with rounds: review', self.cli('reports', 'read', 'review').stderr)
+        self.cli('reports', 'unread', 'motor')
+        self.assertEqual(self.rows()[self.R3]['read'], False)
+        out = self.cli('reports').stdout
+        self.assertIn('== unread: 1\nmotor\t20261031-1500-r3\tモーター変更検討\tモーター & 比較 r3', out)
+        self.assertIn('== read: 1\ncad/widget/case-fit\t20261025-0042-r1\tケース\tcase fit', out)
+        self.assertIn('== pages: 4', out)
+        self.assertIn('review\t-\t-\t<b>review', out)
+
+    def test_wait_json_and_pending_owner(self):
+        page = 'review/index.html'
+        self.cli('reports', 'owner', 'review', 'レビュー', 'sid-3')
+        self.req('/_talk/api/user', {'page': page, 'id': 'C1', 'title': 'x', 'comment': '1 行目\n2 行目'})
+        r = self.cli('wait', '--page', 'review', '--settle', '0.2', '--json')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        d = json.loads(r.stdout)
+        self.assertEqual(d['url'], 'http://x.localhost:%d/' % self.port)
+        it = d['items'][0]
+        self.assertEqual((it['page'], it['id'], it['theme'], it['owner']),
+                         (page, 'C1', 'review', {'name': 'レビュー', 'id': 'sid-3'}))
+        self.assertEqual(it['new'][0]['text'], '1 行目\n2 行目')
+        self.assertEqual(d['also_waiting'], [])
+        self.req('/_talk/api/ack', {'page': page})
+        self.assertEqual(tp.report_key(self.FIT), 'cad/widget/case-fit')
+        self.assertEqual(tp.report_key('motor/20261031-1500-r3/extra.html'), 'motor')
+        self.assertEqual(tp.report_key('fusion/bobbin.html'), 'fusion/bobbin.html')
+        self.assertEqual(tp.report_key('case/20261028-1316-r27-marks/index.html'), 'case')    # a note after rN
+        # without --reports: neither theme nor owner, no list, nothing added to the pages
+        plain = tp.Talk(self.root, 0)
+        plain.store(page).user('C9', comment='x')
+        self.assertNotIn('theme', json.loads(plain.pending(None, 0, False, False))['items'][0])
+        self.assertEqual(plain.get('/_talk/api/reports', {})[0], 404)
+        plain.store(page).ack()
 
 
 if __name__ == '__main__':
