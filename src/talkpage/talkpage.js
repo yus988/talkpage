@@ -63,6 +63,7 @@
       'sb.fit.title': 'Fit the report between the sidebar and the comments',
       'sb.grip': 'Drag to change the width',
       'sb.reports': 'Reports',
+      'sb.all': 'All reports (stars, tags)',
       'sb.page': 'This page',
       'sb.noowner': 'No owner',
       'sb.unread': 'unread {n}',
@@ -119,6 +120,7 @@
       'sb.fit.title': 'サイドバーとコメントの間の幅に本文を合わせる',
       'sb.grip': 'ドラッグで幅の変更',
       'sb.reports': 'レポート',
+      'sb.all': 'レポートの一覧（スター・タグ）',
       'sb.page': 'このページ',
       'sb.noowner': '担当なし',
       'sb.unread': '未読 {n}',
@@ -1367,21 +1369,28 @@
 
   function isUnread(r) { return r.tracked && !r.read; }
 
-  // the reports by owner; unread ones bold, ones added since this page opened marked new, this page marked
+  // the reports by place (a server of several folders) or by owner; unread ones bold, ones added since this page opened
+  // marked new, this page marked
   function renderReports(rows) {
     if (!reportsFirst) {
       reportsFirst = {};
       rows.forEach(function (r) { reportsFirst[r.page] = true; });
     }
     var groups = [], by = {}, keep = rp.body.scrollTop;
+    var byPlace = rows.some(function (r) { return r.group; });
     rows.forEach(function (r) {
-      var name = r.owner || '';
+      var name = (byPlace ? r.group : r.owner) || '';
       if (!by[name]) { by[name] = []; groups.push(name); }
       by[name].push(r);
     });
     rp.body.textContent = '';
+    if (!LISTING) {                            // the list of all reports, with its stars and tags
+      var all = el('a', 'talk-sb-row talk-sb-all', tr('sb.all'));
+      all.href = '/';
+      rp.body.appendChild(all);
+    }
     groups.forEach(function (name) {
-      var rs = by[name], n = rs.filter(isUnread).length, key = 'owner:' + name;
+      var rs = by[name], n = rs.filter(isUnread).length, key = (byPlace ? 'place:' : 'owner:') + name;
       var g = el('div', 'talk-sb-group');
       var head = button('talk-sb-ghead', '');
       head.appendChild(el('span', 'talk-sb-gname', name || tr('sb.noowner')));
@@ -1394,7 +1403,7 @@
         a.href = '/' + r.page.split('/').map(encodeURIComponent).join('/');
         if (isUnread(r)) a.classList.add('talk-unread');
         if (r.page === page) { a.classList.add('talk-here'); a.setAttribute('aria-current', 'page'); }
-        a.appendChild(el('span', 'talk-sb-t', r.title || r.theme || r.page));
+        a.appendChild(el('span', 'talk-sb-t', (r.star ? '★ ' : '') + (r.title || r.theme || r.page)));
         var meta = el('span', 'talk-sb-meta', r.time || '');
         if (!reportsFirst[r.page]) meta.appendChild(el('span', 'talk-sb-new', tr('sb.new')));
         a.appendChild(meta);

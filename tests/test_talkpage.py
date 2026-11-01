@@ -1,4 +1,5 @@
 """Tests of talkpage: the store, the HTTP routes and the wait / reply commands. python -m unittest discover tests"""
+import http.client
 import json
 import os
 import shutil
@@ -351,7 +352,7 @@ class ReportsTest(unittest.TestCase):
         self.req('/_talk/api/ack', {'page': self.R3})
         self.assertEqual(self.rows()[self.R3]['comments'], [])
         code, body = self.req('/')
-        self.assertIn('&lt;b&gt;review'.encode(), body)                        # escaped
+        self.assertIn(b'"\\u003cb>review"', body)                              # nothing in the JSON ends the <script>
         self.assertNotIn(b'<b>review', body)
         self.assertIn(tp.INJECT, body)
         self.assertIn('レポートの一覧'.encode(), body)
@@ -410,6 +411,114 @@ class ReportsTest(unittest.TestCase):
         self.assertNotIn('theme', json.loads(plain.pending(None, 0, False, False))['items'][0])
         self.assertEqual(plain.get('/_talk/api/reports', {})[0], 404)
         plain.store(page).ack()
+
+
+class PlacesTest(unittest.TestCase):
+    """serve --place: the reports of several folders on one server, each at /<id>/; stars and tags from the list."""
+    R5 = 'expo/flyer/20261031-1942-r5/index.html'
+    R3 = 'notes/motor/20261031-1500-r3/index.html'
+
+    @classmethod
+    def setUpClass(cls):
+        cls.top = tempfile.mkdtemp()
+        cls.a, cls.b, cls.c = (os.path.join(cls.top, x) for x in ('a', 'b', 'c'))
+        write(cls.a, 'motor/20261031-1500-r3/index.html', '<html lang="ja"><title>モーター r3</title><body>x</body>')
+        write(cls.a, 'owners.json', json.dumps({'motor': {'name': 'モーター', 'id': 's1'}}, ensure_ascii=False))
+        write(cls.b, 'plan.html', '<title>plan</title>')
+        write(cls.b, '20261026-1506-r2/index.html', '<title>own rounds r2</title>')     # rounds of the place itself
+        write(cls.b, 'index.html', '<title>rounds of props</title>')
+        write(cls.c, 'flyer/20261031-1942-r5/index.html', '<html lang="ja"><title>チラシ r5</title><body>y</body>')
+        write(cls.top, 'secret.html', '<title>outside</title>')
+        cls.marks = os.path.join(cls.top, 'marks.json')
+        cls.talk = tp.Talk(None, 0, 'ja', reports=True, marks=cls.marks, fallback='notes',
+                           places=[('workspace', 'notes', cls.a), ('workspace', 'props', cls.b), ('', 'expo', cls.c)])
+
+        class H(tp.Handler):
+            talk = cls.talk
+        cls.srv = tp.Server(('127.0.0.1', 0), H)
+        cls.port = cls.talk.port = cls.srv.server_address[1]
+        threading.Thread(target=cls.srv.serve_forever, kwargs={'poll_interval': 0.05}, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+        cls.srv.server_close()
+        shutil.rmtree(cls.top)
+
+    req = HttpTest.req
+    cli = HttpTest.cli
+
+    def raw(self, path):
+        """(code, Location) without following a redirect."""
+        c = http.client.HTTPConnection('127.0.0.1', self.port, timeout=10)
+        c.request('GET', path, headers={'Origin': 'http://127.0.0.1:%d' % self.port})
+        r = c.getresponse()
+        r.read()
+        c.close()
+        return r.status, r.getheader('Location')
+
+    def rows(self):
+        self.talk._found = (0.0, None)
+        return {x['page']: x for x in self.req('/_talk/api/reports')[1]['rows']}
+
+    def test_list_and_pages(self):
+        rows = self.rows()
+        self.assertEqual(sorted(rows), sorted([self.R5, self.R3, 'props/plan.html', 'props/20261026-1506-r2/index.html']))
+        self.assertEqual(rows['props/20261026-1506-r2/index.html']['theme'], 'props')
+        r3 = rows[self.R3]
+        self.assertEqual((r3['theme'], r3['place'], r3['group'], r3['owner'], r3['lang']),
+                         ('notes/motor', 'notes', 'workspace', 'モーター', 'ja'))
+        self.assertEqual((rows[self.R5]['group'], rows['props/plan.html']['theme']), ('expo', 'props/plan.html'))
+        code, body = self.req('/' + self.R3)
+        self.assertEqual(code, 200)
+        self.assertIn(tp.INJECT, body)
+        self.assertIn(b'"multi": true', self.req('/')[1])
+        self.assertEqual(self.req('/_talk/api/info')[1]['places'][2]['id'], 'expo')
+
+    def test_paths(self):
+        self.assertEqual(self.raw('/notes/'), (302, '/#notes'))                       # its group in the list
+        self.assertEqual(self.raw('/motor/20261031-1500-r3/'), (301, '/notes/motor/20261031-1500-r3/'))  # --fallback
+        self.assertEqual(self.raw('//evil.example/x'), (301, '/notes/evil.example/x'))  # never //host
+        self.assertEqual(self.raw('/notes/motor'), (301, '/notes/motor/'))
+        for bad in ('/notes/../secret.html', '/notes/%2e%2e/secret.html', '/notes/..%5csecret.html',
+                    '/notes/C:%5cWindows%5cwin.ini', '/expo/flyer/20261031-1942-r5/index.html:x', '/_x/a.html'):
+            self.assertIn(self.raw(bad)[0], (301, 404), bad)
+            self.assertNotEqual(self.req(bad)[0], 200, bad)
+        with self.assertRaises(ValueError):
+            self.talk.page_file('notes/../secret.html')
+        with self.assertRaises(ValueError):
+            self.talk.page_file('other/plan.html')
+        self.assertEqual(tp.quoted(['evil.example'], '//evil.example/'), '/evil.example/')
+        with self.assertRaises(ValueError):
+            tp.Talk(None, 0, places=[('', 'x', self.a), ('', 'x', self.b)])
+        for bad in ('x', 'A=b', '_t=c', '20261031-1500-r3=c', 'g:=c'):
+            with self.assertRaises(SystemExit):
+                tp.parse_place(bad)
+        self.assertEqual(tp.parse_place('g:h:id-1=C:/x=y'), ('g:h', 'id-1', 'C:/x=y'))
+
+    def test_marks_and_read(self):
+        r = self.req('/_talk/api/mark', {'page': self.R5, 'star': True, 'tags': [' 展示 ', '展示', 'later']})
+        self.assertEqual(r, (200, {'page': self.R5, 'star': True, 'tags': ['展示', 'later']}))
+        self.assertEqual((self.rows()[self.R5]['star'], self.rows()[self.R5]['tags']), (True, ['展示', 'later']))
+        self.req('/_talk/api/mark', {'page': self.R5, 'star': False, 'tags': []})
+        with open(self.marks, encoding='utf-8') as f:
+            self.assertEqual(json.load(f), {'pages': {}})                 # nothing left: the entry goes
+        for bad in ({'page': self.R5, 'tags': ['a,b']}, {'page': self.R5, 'star': 'yes'},
+                    {'page': 'secret.html', 'star': True}, {'page': self.R5, 'tags': [str(i) for i in range(9)]}):
+            self.assertEqual(self.req('/_talk/api/mark', bad)[0], 400, bad)
+        self.req('/_talk/api/user', {'page': self.R3, 'id': 'read', 'status': '読んだ', 'notify': False})
+        self.assertTrue(self.rows()[self.R3]['read'])
+        self.assertEqual(json.loads(self.talk.pending(None, 0, False, False))['items'], [])   # not for the agent
+
+    def test_owner_command(self):
+        r = self.cli('reports', 'owner', 'expo/flyer', 'チラシ', 'sid-9')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with open(os.path.join(self.c, 'owners.json'), encoding='utf-8') as f:
+            self.assertEqual(json.load(f), {'flyer': {'name': 'チラシ', 'id': 'sid-9'}})
+        self.assertEqual(self.rows()[self.R5]['owner'], 'チラシ')
+        r = self.cli('reports', 'read', 'expo/flyer')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.rows()[self.R5]['status'], '読んだ')
 
 
 class TailnetTest(unittest.TestCase):

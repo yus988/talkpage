@@ -23,6 +23,7 @@ pipx install git+https://github.com/yus988/talkpage
 
 ```
 talkpage serve <root> [--port 8190] [--open <ページ>] [--name <名前>.localhost] [--reports] [--tailscale]
+talkpage serve --place [<見出し>:]<id>=<フォルダ> ... [--fallback <id>] [--marks <ファイル>] --reports ...
 ```
 
 - `<root>`: ページを置くフォルダ（例: workspace の作業メモのフォルダ）。その下の HTML を `http://127.0.0.1:8190/<root からのパス>` で開ける。案件のページとデータは使う側の workspace に置き、ツールの repo には入れない
@@ -33,6 +34,7 @@ talkpage serve <root> [--port 8190] [--open <ページ>] [--name <名前>.localh
 - ポートは `--port` か環境変数 `TALKPAGE_PORT`（既定 8190）。`wait` / `reply` / `ack` / `show` / `reports` も同じ値を使う
 - `--name <名前>.localhost`（既定は環境変数 `TALKPAGE_NAME`）: ページを `http://<名前>.localhost/` でも配る（`127.0.0.1:80` に 2 本目の待ち受けを立てる）。ブラウザは `*.localhost` を必ずこの PC に向けるので、hosts の設定は要らない。ポート 80 が使えなければ 1 行の注意を出し、`http://<名前>.localhost:<port>/` になる。エージェントのコマンドは今までどおり `127.0.0.1:<port>` を使う。`.localhost` で終わらない名前は拒否する
 - `--reports`: root をレポートの置き場として扱う（下の「レポートの読み場」）
+- `--place [<見出し>:]<id>=<フォルダ>`（`<root>` の代わりに、くり返す）: 複数のフォルダを 1 つのサーバーで配る（下の「複数のフォルダ」）
 - `--tailscale`: スマホや外の PC から、[Tailscale](https://tailscale.com/kb/1312/serve) の tailnet（自分の端末だけの私設の網）を通して開けるようにする（下の「外から開く」）
 
 ## 外から開く（`--tailscale`）
@@ -153,6 +155,27 @@ talkpage serve <レポートの置き場> --reports --name notes.localhost
 
 **配り方**: root の下の HTML を返す時に、`talkpage.css` と `talkpage.js`（`data-talk-report` 付き）を `</body>` の前に足す（応答の中だけで、ファイルは変えない。talkpage.js を自分で読み込むページには足さない）。表示の幅の指定（`<meta name="viewport">`）が無いページには、それも足す（無いと、スマホは画面より広く並べ、横に動いてしまう）。root に `index.html` が無ければ、`/` はレポートの一覧のページになる。
 
+**複数のフォルダ（`--place`）**: いくつもの workspace のレポートを、1 つのサーバーと 1 つの一覧で読む。ファイルは今の場所のまま、サーバーに置き場所を登録する。
+
+```
+talkpage serve --reports --place "sdk-workspace:notes=C:/ws-a/dev-notes" --place "sdk-workspace:proposals=C:/ws-a/docs/proposals" --place "ops:outputs=C:/ws-b/outputs" --fallback notes
+```
+
+- 各フォルダは `/<id>/` に出る（id は英小文字・数字・`-`。回の形の名前は不可）。ページのパスは `<id>/<フォルダからのパス>` になり、`.talk.json` はページの横、`owners.json` は各フォルダに置く（キーは id を付けない形）
+- `<見出し>` は一覧でフォルダをまとめる名前（省くと id）。いくつかのフォルダが同じ見出しを持ってよい
+- `/` はいつも一覧。`/<id>/` はそのフォルダに `index.html` が無ければ、一覧のその見出しへ移る
+- `--fallback <id>`: 最初の部分がどの id でもないパスを `/<id>/<パス>` へ転送する（1 つの root で配っていた頃のリンクを生かす）
+- フォルダの直下に回があれば、そのフォルダ自体をテーマとして出す
+- フォルダを辿った結果は 5 秒使い回す（各ページのサイドバーが 30 秒ごとに聞くため）。大きなフォルダ（同期のフォルダ全体など）は登録せず、レポートのある下のフォルダを登録する
+
+**一覧のページ**（`/`）: 見出しごとにまとめて畳める（「場所ごと」）か、全部を新しい順（「新しい順」。`--place` のときだけ切り替えが出る）。上の欄で「すべて」「未読」「★ あとで」と各タグで絞る。各行のボタン:
+
+- ☆ / ★: あとでもう一度見るものの印
+- `#`: タグを付ける（カンマか読点で区切って入力。空にすると外す。1 つ 24 字まで、8 つまで）
+- 既読に / 未読に: 回のあるテーマの「読んだ」を付け外す（ページの末尾の欄と同じ。エージェントは起こさない）
+
+スターとタグは、レポートの横ではなく 1 つのファイル（`--marks`。既定 `~/.talkpage/marks-<port>.json`）に置く（git に入れない、自分だけの印）。表示の切り替え・絞り込み・畳み方はこのブラウザに残る。各レポートのサイドバーの上には一覧へのリンクが出て、★ の付いたものに印が付く。`--place` のときは、サイドバーも見出しごとにまとめる。
+
 **画面**
 
 - 本文の文字を選ぶと「コメント」のボタンが出る（スマホでは長押しで選び、範囲を決めて指を止めると、選んだ所の下に出る）。押すと右の余白にカードが開き、最初に送った時にその項目（`C1`・`C2`…。題は選んだ文字）ができる。送らずに離れる（ほかの所を押す・Esc）と消える
@@ -171,7 +194,7 @@ talkpage serve <レポートの置き場> --reports --name notes.localhost
 | | |
 |---|---|
 | `talkpage reports` / `reports list` | 未読（古い順）・既読・1 枚のページを `テーマ<TAB>回<TAB>担当<TAB>題` で出す。答えていないコメントは ` [comments: C1,C2]`、タブで開いているものは ` [open]` |
-| `reports owner <テーマ> <名前> <id>` | そのテーマの担当（レポートを書いたセッションの名前と id）を `<root>/owners.json` に書く |
+| `reports owner <テーマ> <名前> <id>` | そのテーマの担当（レポートを書いたセッションの名前と id）を `<root>/owners.json` に書く（`--place` なら、テーマの頭の id のフォルダの `owners.json` に、id を除いたキーで） |
 | `reports read <テーマ>…` / `reports read all` / `reports unread <テーマ>…` | 最後の回の「読んだ」を付ける・外す |
 | `reports open [--owner 文字]` | 未読のページを既定のブラウザで開く（タブで開いているものは除く）。`--owner` なら担当の名前にその文字を含むテーマを、既読も含めて開く |
 
@@ -211,9 +234,10 @@ talkpage serve <レポートの置き場> --reports --name notes.localhost
 
 | | |
 |---|---|
-| `GET /_talk/api/info` | root、ポート、エージェントの状態（`listening` / `working` / `absent`）、状態のあるページ、`name`・`url`（ユーザーが読むアドレス。`--tailscale` なら tailnet のアドレス）・`local_url`（この PC だけのアドレス）、`open`（90 秒以内に `state` を `open=1` 付きで聞いたページ = ブラウザのタブで開いているページ） |
+| `GET /_talk/api/info` | root（`--place` なら `places: [{id, group, root}]`）、ポート、エージェントの状態（`listening` / `working` / `absent`）、状態のあるページ、`name`・`url`（ユーザーが読むアドレス。`--tailscale` なら tailnet のアドレス）・`local_url`（この PC だけのアドレス）、`open`（90 秒以内に `state` を `open=1` 付きで聞いたページ = ブラウザのタブで開いているページ） |
 | `GET /_talk/api/state?page=P` | ページの全項目。`&rev=N&wait=25`（と `&presence=…`）を付けると、版（とエージェントの状態）が変わるまで最大その秒数待つ。`&open=1` でそのページを「開いている」とする |
-| `GET /_talk/api/reports` | `--reports` のときだけ。レポートの一覧 `{root, url, rows: [{page, theme, round, title, owner, tracked, status, read, comments, time}]}`（新しい順） |
+| `GET /_talk/api/reports` | `--reports` のときだけ。レポートの一覧 `{root, url, places, rows: [{page, theme, round, title, owner, tracked, status, read, comments, time, lang, place, group, star, tags}]}`（新しい順） |
+| `POST /_talk/api/mark` `{page, star?, tags?}` | `--reports` のときだけ。一覧のスター（`true` / `false`）とタグ（文字列の配列。`[]` で外す）。省いた方はそのまま |
 | `GET /_talk/api/pending[?page=P]` | エージェント未読の項目と、各項目の新しいユーザーの操作（`new`）。`wait` の内部で `&wait=50&listen=1`（待っている間は「受付中」、出したものは再び出さない）と `&take=1` を使う |
 | `POST /_talk/api/user` `{page, id, title?, status?, comment?, notify?}` | ユーザーの操作（ページが送る）。`status: ""` で解除、`notify: false` でエージェントを起こさない |
 | `POST /_talk/api/seen` `{page, id}` | ユーザーがエージェントのメッセージを読んだ |
@@ -234,7 +258,7 @@ agent・ack・state・pending の `page` は、パスの一部（状態のある
   - 状態を変える要求（POST・DELETE と、`wait` が項目を受け取る `pending?listen=1` / `take=1`）で、`Origin` が無く、ページからの要求の印（`Sec-Fetch-Site: same-origin`、または自分の `Referer`）も無いもの。ブラウザの外のクライアントは `Origin: http://127.0.0.1:<port>` を付ける（`talkpage` のコマンドは付けている）。読むだけの GET（`info`・`state`）は、ヘッダー無しの curl でも読める
 - POST は JSON だけなので、別のサイトのフォーム（`text/plain` 等）からは送れない。ページは `X-Frame-Options: SAMEORIGIN` で、別のサイトの枠に入れて押させることもできない
 - root の下の HTML はすべて同じ origin で、ユーザーとしてコメントを送れる。root にはエージェントが作ったページだけを置き、ダウンロードした HTML や外部のページの保存を置かない。外から取った文（メール・Web・データシート）をページに入れるときは、HTML ではなく文字として入れる
-- 配るファイルは root の下だけ（`..` と `.` で始まる名前は拒否）。書くのは root の下に実在するページの横の `.talk.json` だけ（`owners.json` は `reports owner` のコマンドが書く）
+- 配るファイルは root（`--place` なら各フォルダ）の下だけ（`..`、`.` で始まる名前、`\`、`:` を含む名前は拒否。実際のパスがフォルダの外を指すもの（リンク）も拒否）。転送の行き先は、要求のパスから作る自分のパスだけ（`//<ホスト>` にならない）。書くのは root の下に実在するページの横の `.talk.json` だけ（`owners.json` は `reports owner` のコマンドが書く）
 - `--reports` で HTML に足すのは固定の 2 つのタグだけ（ページやユーザーの値を混ぜない）
 - メッセージの表示はすべて文字として入れる（改行、`` `コード` ``、http(s) のリンクだけを整える）
 

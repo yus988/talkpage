@@ -3,6 +3,7 @@
 
   python talkpage.py serve <root> [--port 8190] [--open PAGE] [--lang en|ja] [--name NAME.localhost] [--reports]
                            [--tailscale]
+  python talkpage.py serve --place [GROUP:]ID=FOLDER ... [--fallback ID] [--marks FILE] --reports ...
   python talkpage.py wait  [--page P] [--settle 4] [--json]
   python talkpage.py reply --page P --id ID [--status S] [--text T | --text - | --file F] [--fields JSON] [--summary S]
   python talkpage.py ack   [--page P] [--id ID ...]
@@ -23,6 +24,10 @@ talkpage.js to every page it serves. reports: list them, set a theme's owner ses
 --tailscale: also take the requests that Tailscale serve proxies from this PC's tailnet name (set it with
 `tailscale serve --bg --https=443 http://127.0.0.1:<port>`) when they carry the login of this PC's own user; the
 address the user reads becomes https://<PC>.<tailnet>.ts.net/, which the user's phone opens too.
+--place (instead of <root>, repeat it): one server for the reports of several folders, each at /<ID>/ (ID: a-z, 0-9
+and -); GROUP heads the folder's reports in the list (several places may share one). A page path is then
+<ID>/<path under the folder>. --fallback ID: a path whose first part is no place goes to /<ID>/<path> (links made
+before the places). --marks: the stars and tags set in the list (default ~/.talkpage/marks-<port>.json).
 """
 import argparse
 import email.errors
@@ -56,6 +61,9 @@ TYPES = {'.html': 'text/html', '.htm': 'text/html', '.css': 'text/css', '.js': '
          '.mp4': 'video/mp4', '.woff2': 'font/woff2'}
 LANGS = ('en', 'ja')
 NAME_RE = re.compile(r'^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+localhost$')
+PLACE_RE = re.compile(r'^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$')     # the first part of a page path under --place
+TAG_RE = re.compile(r'^[^\x00-\x1f\x7f,]{1,24}$')
+FOUND_SECONDS = 5                                               # the walk of the folders is reused this long
 ROUND_RE = re.compile(r'^\d{8}-\d{4}-r\d+(-[^/]+)?$')      # a round <theme>/<round>/index.html (also r27-marks)
 TITLE_RE = re.compile(rb'<title[^>]*>(.*?)</title', re.I | re.S)
 LANG_RE = re.compile(rb'<html[^>]*?\slang\s*=\s*["\']?([A-Za-z-]+)', re.I)
@@ -78,12 +86,230 @@ LISTING = {
 # the list of reports (/ under --reports when the root has no index.html)
 REPORTS = {
     'en': {'title': 'Reports', 'unread': 'unread', 'comments': 'comments: %s', 'none': '(no reports yet)',
-           'no_owner': 'no owner', 'meta': 'root: %s · all pages with a state: <a href="/_talk/">/_talk/</a>'},
+           'no_owner': 'no owner', 'meta': 'root: %s · all pages with a state: <a href="/_talk/">/_talk/</a>',
+           'all': 'All', 'only_unread': 'Unread', 'starred': '★ Later', 'by_place': 'By place', 'by_time': 'Newest',
+           'places': '%d folders · all pages with a state: <a href="/_talk/">/_talk/</a>',
+           'mark_read': 'Mark read', 'mark_unread': 'Unread', 'star': 'Look again later', 'tags': 'Tags',
+           'tag_prompt': 'Tags, separated by commas (empty removes them)', 'count': '%d', 'failed': 'Not saved'},
     'ja': {'title': 'レポートの一覧', 'unread': '未読', 'comments': 'コメント %s', 'none': '（まだ無い）',
-           'no_owner': '担当なし', 'meta': 'root: %s ・ 状態のあるページの一覧: <a href="/_talk/">/_talk/</a>'},
+           'no_owner': '担当なし', 'meta': 'root: %s ・ 状態のあるページの一覧: <a href="/_talk/">/_talk/</a>',
+           'all': 'すべて', 'only_unread': '未読', 'starred': '★ あとで', 'by_place': '場所ごと', 'by_time': '新しい順',
+           'places': 'フォルダ %d か所 ・ 状態のあるページの一覧: <a href="/_talk/">/_talk/</a>',
+           'mark_read': '既読に', 'mark_unread': '未読に', 'star': 'あとでもう一度見る', 'tags': 'タグ',
+           'tag_prompt': 'タグ（カンマか読点で区切る。空にすると外す）', 'count': '%d 件', 'failed': '保存できませんでした'},
 }
 FAVICON = ("<link rel=\"icon\" href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>"
            "<text y='.9em' font-size='90'>💬</text></svg>\">")
+# the list of reports (report_listing): the rows come in as JSON and the script draws them (textContent only). By place
+# (a heading per group, folded by a tap) or newest first; all / unread / starred / a tag; a star, the tags and "read"
+# are set by the buttons of a row. The view, the filter and the folds stay in localStorage
+LISTING_PAGE = r'''<!doctype html><html lang="{{LANG}}"><head><meta charset="utf-8">{{VIEWPORT}}<title>{{TITLE}}</title>
+{{FAVICON}}<style>
+:root{color-scheme:light dark;--line:#8884;--dim:#777;--link:#0a5fb4;--red:#cf222e;--amber:#b45309;--chip:#8881}
+@media (prefers-color-scheme:dark){:root{--link:#6cb6ff;--red:#f85149;--amber:#d29922;--dim:#999}}
+body{font:15px/1.6 system-ui,sans-serif;margin:24px 16px;overflow-wrap:anywhere}
+main{max-width:900px}h1{font-size:22px;margin:0 0 8px}
+.meta{color:var(--dim);font-size:13px;margin:0 0 12px}
+#talk-bar{display:flex;flex-wrap:wrap;gap:8px 16px;margin:0 0 12px}.grp{display:flex;flex-wrap:wrap;gap:6px}
+button{font:inherit;color:inherit;cursor:pointer}
+.chip{border:1px solid var(--line);background:none;border-radius:16px;padding:3px 12px;font-size:14px}
+.chip.on{background:var(--link);border-color:var(--link);color:#fff}.chip .n{margin-left:6px;opacity:.75;font-size:12px}
+ul{list-style:none;margin:0;padding:0}li{display:flex;align-items:flex-start;gap:8px;border-top:1px solid var(--line)}
+li a{flex:1;min-width:0;display:block;padding:8px 2px;color:inherit;text-decoration:none}
+li a:hover .t{text-decoration:underline}.t{font-weight:600;color:var(--link)}
+.u{margin-left:8px;font-size:12px;color:var(--red)}.c{margin-left:8px;font-size:13px;color:var(--amber)}
+.m{display:block;color:var(--dim);font-size:13px}.tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}
+.tag{font-size:12px;background:var(--chip);border-radius:4px;padding:0 6px}
+.acts{position:relative;flex:none;display:flex;gap:4px;padding-top:6px}
+.act{min-width:36px;height:32px;border:1px solid var(--line);background:none;border-radius:6px;padding:0 6px;font-size:14px}
+.act.read{min-width:64px}.act.star.on{color:#d4a017}.act:disabled{opacity:.5}
+.flash{position:absolute;right:0;top:40px;z-index:2;white-space:nowrap;font-size:12px;background:var(--red);color:#fff;
+  border-radius:4px;padding:2px 6px}
+.group{margin:0 0 16px}.ghead{display:flex;gap:10px;align-items:baseline;width:100%;text-align:left;border:none;
+  background:var(--chip);border-radius:6px;padding:6px 10px;font-size:16px;font-weight:600}
+.ghead::before{content:"▾";width:1em}.ghead[aria-expanded=false]::before{content:"▸"}
+.ghead .n{font-weight:400;font-size:13px;color:var(--dim)}.ghead .u{margin-left:0}
+.none{color:var(--dim)}
+</style></head>
+<body data-talk-listing><main><h1>{{TITLE}}</h1><p class="meta">{{META}}</p><div id="talk-bar"></div>
+<div id="talk-list"></div></main>
+<script type="application/json" id="talk-data">{{DATA}}</script>
+<script>
+(function () {
+  var D = JSON.parse(document.getElementById('talk-data').textContent), M = D.m;
+  var KEY = 'talk-listing', S = { view: 'place', filter: 'all', fold: {} };
+  try {
+    var v = JSON.parse(localStorage.getItem(KEY) || 'null');
+    if (v && typeof v === 'object') {
+      if (v.view === 'place' || v.view === 'time') S.view = v.view;
+      if (typeof v.filter === 'string') S.filter = v.filter;
+      if (v.fold && typeof v.fold === 'object') S.fold = v.fold;
+    }
+  } catch (e) {}
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  var bar = document.getElementById('talk-bar'), list = document.getElementById('talk-list');
+  function unread(r) { return r.tracked && !r.read; }
+  function href(r) { return '/' + r.page.split('/').map(encodeURIComponent).join('/'); }
+  function theme(r) { return r.place && r.theme.indexOf(r.place + '/') === 0 ? r.theme.slice(r.place.length + 1) : r.theme; }
+  function tagsOf() {
+    var n = {};
+    D.rows.forEach(function (r) { r.tags.forEach(function (t) { n[t] = (n[t] || 0) + 1; }); });
+    return n;
+  }
+  function match(r) {
+    if (S.filter === 'unread') return unread(r);
+    if (S.filter === 'star') return r.star;
+    if (S.filter.indexOf('tag:') === 0) return r.tags.indexOf(S.filter.slice(4)) >= 0;
+    return true;
+  }
+  function chip(label, on, n, fn) {
+    var b = el('button', 'chip' + (on ? ' on' : ''), label);
+    if (n != null) b.appendChild(el('span', 'n', String(n)));
+    b.setAttribute('aria-pressed', String(on));
+    b.addEventListener('click', fn);
+    return b;
+  }
+  function drawBar(tags) {
+    bar.textContent = '';
+    var f = el('div', 'grp');
+    [['all', M.all, D.rows.length], ['unread', M.only_unread, D.rows.filter(unread).length],
+     ['star', M.starred, D.rows.filter(function (r) { return r.star; }).length]].forEach(function (x) {
+      f.appendChild(chip(x[1], S.filter === x[0], x[2], function () { S.filter = x[0]; save(); draw(); }));
+    });
+    Object.keys(tags).sort().forEach(function (t) {
+      f.appendChild(chip('#' + t, S.filter === 'tag:' + t, tags[t], function () { S.filter = 'tag:' + t; save(); draw(); }));
+    });
+    bar.appendChild(f);
+    if (!D.multi) return;
+    var g = el('div', 'grp');
+    [['place', M.by_place], ['time', M.by_time]].forEach(function (x) {
+      g.appendChild(chip(x[1], S.view === x[0], null, function () { S.view = x[0]; save(); draw(); }));
+    });
+    bar.appendChild(g);
+  }
+  // a short note by the button it is about (a failed save)
+  function flash(btn, text) {
+    var t = el('span', 'flash', text);
+    btn.parentNode.appendChild(t);
+    setTimeout(function () { t.remove(); }, 2500);
+  }
+  function send(api, body, btn, done) {
+    btn.disabled = true;
+    fetch('/_talk/api/' + api, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(body) })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (d) { done(d); draw(); })
+      .catch(function () { btn.disabled = false; flash(btn, M.failed); });
+  }
+  function row(r, withGroup) {
+    var li = el('li'), a = el('a');
+    a.href = href(r);
+    a.appendChild(el('span', 't', r.title));
+    if (unread(r)) a.appendChild(el('b', 'u', M.unread));
+    if (r.comments.length) a.appendChild(el('span', 'c', M.comments.replace('%s', r.comments.join(', '))));
+    a.appendChild(el('span', 'm', [withGroup ? r.group : '', theme(r), r.round, r.owner || M.no_owner, r.time]
+      .filter(Boolean).join(' · ')));
+    if (r.tags.length) {
+      var tg = el('span', 'tags');
+      r.tags.forEach(function (t) { tg.appendChild(el('span', 'tag', '#' + t)); });
+      a.appendChild(tg);
+    }
+    li.appendChild(a);
+    var acts = el('div', 'acts');
+    var star = el('button', 'act star' + (r.star ? ' on' : ''), r.star ? '★' : '☆');
+    star.title = M.star;
+    star.setAttribute('aria-label', M.star);
+    star.setAttribute('aria-pressed', String(r.star));
+    star.addEventListener('click', function () {
+      send('mark', { page: r.page, star: !r.star }, star, function (d) { r.star = d.star; });
+    });
+    var tag = el('button', 'act', '#');
+    tag.title = M.tags;
+    tag.setAttribute('aria-label', M.tags);
+    tag.addEventListener('click', function () {
+      var v = prompt(M.tag_prompt, r.tags.join(', '));
+      if (v === null) return;
+      var ts = v.split(/[,、，]/).map(function (s) { return s.trim(); }).filter(Boolean);
+      send('mark', { page: r.page, tags: ts }, tag, function (d) { r.tags = d.tags; });
+    });
+    acts.appendChild(star);
+    acts.appendChild(tag);
+    if (r.tracked) {                           // a theme with rounds has the item "read"
+      var rd = el('button', 'act read', r.read ? M.mark_unread : M.mark_read);
+      rd.addEventListener('click', function () {
+        var st = r.read ? '' : /^ja/.test(r.lang) ? D.read[0] : D.read[1];
+        send('user', { page: r.page, id: 'read', status: st, notify: false }, rd,
+             function () { r.read = !!st; r.status = st; });
+      });
+      acts.appendChild(rd);
+    }
+    li.appendChild(acts);
+    return li;
+  }
+  function draw() {
+    var tags = tagsOf();
+    if (S.filter.indexOf('tag:') === 0 && !tags[S.filter.slice(4)]) S.filter = 'all';
+    drawBar(tags);
+    list.textContent = '';
+    var rows = D.rows.filter(match), ul;
+    if (!rows.length) { list.appendChild(el('p', 'none', M.none)); return; }
+    if (S.view === 'time' || !D.multi) {
+      ul = el('ul');
+      rows.forEach(function (r) { ul.appendChild(row(r, D.multi)); });
+      list.appendChild(ul);
+      return;
+    }
+    var groups = [], by = {};
+    function add(g) { if (!by[g]) { by[g] = []; groups.push(g); } }
+    D.places.forEach(function (p) { add(p.group); });
+    rows.forEach(function (r) { add(r.group); by[r.group].push(r); });
+    groups.forEach(function (g) {
+      var rs = by[g];
+      if (!rs.length) return;
+      var sec = el('section', 'group'), head = el('button', 'ghead'), n = rs.filter(unread).length;
+      sec.setAttribute('data-group', g);
+      head.appendChild(el('span', '', g));
+      head.appendChild(el('span', 'n', M.count.replace('%d', rs.length)));
+      if (n) head.appendChild(el('span', 'u', M.unread + ' ' + n));
+      ul = el('ul');
+      rs.forEach(function (r) { ul.appendChild(row(r, false)); });
+      ul.hidden = !!S.fold[g];
+      head.setAttribute('aria-expanded', String(!S.fold[g]));
+      head.addEventListener('click', function () {
+        if (S.fold[g]) delete S.fold[g]; else S.fold[g] = true;
+        save();
+        draw();
+      });
+      sec.appendChild(head);
+      sec.appendChild(ul);
+      list.appendChild(sec);
+    });
+  }
+  // /<place>/ comes here as /#<place>: that place's group, open
+  var h = decodeURIComponent(location.hash.slice(1)), at = D.places.filter(function (p) { return p.id === h; })[0];
+  if (at) { S.view = 'place'; S.filter = 'all'; delete S.fold[at.group]; }
+  draw();
+  if (at) {
+    [].forEach.call(list.querySelectorAll('[data-group]'), function (s) {
+      if (s.getAttribute('data-group') === at.group) s.scrollIntoView();
+    });
+  }
+  function reload() {
+    fetch('/_talk/api/reports', { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { if (d && Array.isArray(d.rows)) { D.rows = d.rows; draw(); } })
+      .catch(function () {});
+  }
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') reload(); });
+  setInterval(function () { if (document.visibilityState === 'visible') reload(); }, 60000);
+})();
+</script></body></html>'''
 
 
 def default_lang(env_name='TALKPAGE_LANG'):
@@ -192,6 +418,18 @@ def report_key(page):
         if ROUND_RE.match(parts[i]):
             return '/'.join(parts[:i])
     return '/'.join(parts[:-1]) if parts[-1] == 'index.html' and len(parts) > 1 else page
+
+
+def bad_part(s):
+    """A part of a URL path that is never served: empty, . and .., a hidden name, a backslash, and a colon (on
+    Windows a drive, which would leave the folder, or a file's stream)."""
+    return s in ('', '.', '..') or s.startswith('.') or '\\' in s or ':' in s
+
+
+def quoted(parts, raw):
+    """A path of our own for a redirect, from the parts of a request's path (ending with / when raw does): never
+    //host, which a browser would take for another site."""
+    return '/' + '/'.join(urllib.parse.quote(x) for x in parts) + ('/' if raw.endswith('/') and parts else '')
 
 
 def inject(data):
@@ -384,18 +622,52 @@ class Store:
         return out
 
 
-class Talk:
-    """The stores under one root, the agent's presence, and the /_talk/api/ routes. Another server can host stores
-    kept at its own paths (attach) and hand /_talk/api/ requests to get() / post()."""
+class Place:
+    """A folder of pages: at / when it is the only one (id ''), else at /<id>/ (--place)."""
 
-    def __init__(self, root=None, port=PORT, lang='en', name=None, reports=False, remote=None):
-        self.root = os.path.realpath(root) if root else None
+    def __init__(self, pid, root, group=''):
+        self.id, self.root, self.group = pid, os.path.realpath(root), group or pid
+
+    def key(self, rel):
+        """The page path of a path under the folder."""
+        return self.id + '/' + rel if self.id and rel else self.id or rel
+
+
+def parse_place(text):
+    """(group, id, folder) of --place [GROUP:]ID=FOLDER, or SystemExit."""
+    left, sep, folder = text.partition('=')
+    group, _, pid = left.rpartition(':')
+    if not sep or not folder or not PLACE_RE.match(pid) or ROUND_RE.match(pid):
+        raise SystemExit('talkpage: --place [GROUP:]ID=FOLDER, ID of a-z, 0-9 and - (not like a round): %s' % text)
+    return group.strip(), pid, folder
+
+
+class Talk:
+    """The stores under one root (or the places of --place), the agent's presence, and the /_talk/api/ routes.
+    Another server can host stores kept at its own paths (attach) and hand /_talk/api/ requests to get() / post()."""
+
+    def __init__(self, root=None, port=PORT, lang='en', name=None, reports=False, remote=None, places=None,
+                 fallback=None, marks=None):
+        if places:                             # [(group, id, folder)] of parse_place()
+            self.places = [Place(pid, folder, group) for group, pid, folder in places]
+            ids = [p.id for p in self.places]
+            if len(set(ids)) != len(ids):
+                raise ValueError('two places with one id: %s' % ', '.join(ids))
+            if fallback and fallback not in ids:
+                raise ValueError('--fallback: no place %s' % fallback)
+        else:
+            self.places = [Place('', root)] if root else []
+        self.multi = bool(places)
+        self.root = None if self.multi else self.places[0].root if self.places else None
+        self.fallback = fallback if self.multi else None
+        self.marks_path = marks or os.path.join(os.path.expanduser('~'), '.talkpage', 'marks-%d.json' % port)
+        self._found = (0.0, None)              # (when, the walk of reports())
         self.port = port
         self.lang = lang if lang in LANGS else 'en'      # of the index page; the pages carry their own <html lang>
         self.name = name or None                         # --name, checked by check_name()
         self.on80 = False                                # a second listener serves the name on port 80
         self.remote, self.remote_login = remote or (None, None)     # --tailscale: (origin, login) of tailscale()
-        self.report_mode = bool(reports and self.root)
+        self.report_mode = bool(reports and self.places)
         self.viewed = {}                                 # page -> when a page last asked for its state with open=1
         self.cond = threading.Condition()
         self.stores = {}
@@ -403,8 +675,7 @@ class Talk:
         self.last_listen = 0.0                 # end of the last one
         self.taken_at = 0.0                    # when a `wait` last took items (the agent is working on them)
         self.last_user_at = 0.0
-        if self.root:
-            self.scan()
+        self.scan()
         threading.Thread(target=self._watch_presence, daemon=True).start()
 
     @property
@@ -421,40 +692,101 @@ class Talk:
         return 'http://127.0.0.1:%d/' % self.port
 
     def owners(self):
-        """{theme: {name, id}} of <root>/owners.json (written by `talkpage reports owner`), or {}."""
+        """{theme: {name, id}} of each place's owners.json (written by `talkpage reports owner`), the themes as page
+        paths (with the place's id)."""
+        out = {}
+        for pl in self.places:
+            try:
+                with open(os.path.join(pl.root, 'owners.json'), encoding='utf-8') as f:
+                    d = json.load(f)
+            except (OSError, ValueError):
+                continue
+            if isinstance(d, dict):
+                out.update((pl.key(k), v) for k, v in d.items() if isinstance(v, dict))
+        return out
+
+    def marks(self):
+        """{page: {star, tags}} set in the list of reports (the file of --marks), or {}."""
         try:
-            with open(os.path.join(self.root, 'owners.json'), encoding='utf-8') as f:
+            with open(self.marks_path, encoding='utf-8') as f:
                 d = json.load(f)
         except (OSError, ValueError):
             return {}
-        return {k: v for k, v in d.items() if isinstance(v, dict)} if isinstance(d, dict) else {}
+        pages = d.get('pages') if isinstance(d, dict) else None
+        return {k: v for k, v in pages.items() if isinstance(v, dict)} if isinstance(pages, dict) else {}
+
+    def mark(self, page, star=None, tags=None):
+        """Star a report or set its tags (None keeps them). Callers hold self.cond."""
+        p, _ = self.page_file(page)
+        if star is not None and not isinstance(star, bool):
+            raise ValueError('star: true or false')
+        if tags is not None:
+            if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
+                raise ValueError('tags: a list of strings')
+            tags = list(dict.fromkeys(t.strip() for t in tags if t.strip()))
+            if len(tags) > 8 or not all(TAG_RE.match(t) for t in tags):
+                raise ValueError('tags: up to 8, each 1-24 characters without commas or control characters')
+        marks = self.marks()
+        m = dict(marks.get(p) or {})
+        if star is not None:
+            m['star'] = star
+        if tags is not None:
+            m['tags'] = tags
+        m = {k: v for k, v in m.items() if v}
+        if m:
+            marks[p] = m
+        else:
+            marks.pop(p, None)
+        os.makedirs(os.path.dirname(self.marks_path) or '.', exist_ok=True)
+        tmp = self.marks_path + '.tmp'
+        with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
+            json.dump({'pages': marks}, f, ensure_ascii=False, indent=1, sort_keys=True)
+            f.write('\n')
+        os.replace(tmp, self.marks_path)
+        return {'page': p, 'star': bool(m.get('star')), 'tags': m.get('tags') or []}
+
+    def walk_reports(self):
+        """(theme, round, page, file, time, title, lang, place) of each report: the last round of each theme with
+        rounds, and the single pages. The walk is reused for FOUND_SECONDS (the pages' sidebars ask every 30 s)."""
+        when, found = self._found
+        if found is not None and time.time() - when < FOUND_SECONDS:
+            return found
+        found = []
+        for pl in self.places:
+            for d, dirs, files in os.walk(pl.root):
+                dirs[:] = sorted(x for x in dirs if not x.startswith(('.', '_')) and x not in SKIP_DIRS)
+                rel = os.path.relpath(d, pl.root).replace('\\', '/')
+                rel = '' if rel == '.' else rel
+                rounds = [x for x in dirs if ROUND_RE.match(x) and os.path.isfile(os.path.join(d, x, 'index.html'))]
+                if rounds and (rel or pl.id):  # a theme: its last round; the earlier ones are linked from its index
+                    r = max(rounds, key=natural)   # (a place's own rounds: the place is the theme)
+                    full = os.path.join(d, r, 'index.html')
+                    data = head(full)
+                    found.append((pl.key(rel), r, pl.key('/'.join(x for x in (rel, r, 'index.html') if x)), full,
+                                  '%s-%s-%s %s:%s' % (r[:4], r[4:6], r[6:8], r[9:11], r[11:13]),
+                                  page_title(data), page_lang(data), pl))
+                dirs[:] = [x for x in dirs if not ROUND_RE.match(x)]     # the other files of a round are not rows
+                for f in sorted(files):
+                    if not f.lower().endswith(('.html', '.htm')) or f == 'index.html' and (rounds or not rel):
+                        continue               # the index of the rounds, and the place's own index
+                    page = pl.key(rel + '/' + f if rel else f)
+                    full = os.path.join(d, f)
+                    try:
+                        t = time.strftime('%Y-%m-%d %H:%M', time.localtime(os.path.getmtime(full)))
+                    except OSError:
+                        continue
+                    data = head(full)
+                    found.append((report_key(page), '', page, full, t, page_title(data), page_lang(data), pl))
+        self._found = (time.time(), found)
+        return found
 
     def reports(self):
-        """The reports under the root: the last round of each theme with rounds, and the single pages, newest first."""
-        found = []                             # (theme key, round, page, file, time)
-        for d, dirs, files in os.walk(self.root):
-            dirs[:] = sorted(x for x in dirs if not x.startswith(('.', '_')) and x not in SKIP_DIRS)
-            rel = os.path.relpath(d, self.root).replace('\\', '/')
-            rel = '' if rel == '.' else rel
-            rounds = [x for x in dirs if ROUND_RE.match(x) and os.path.isfile(os.path.join(d, x, 'index.html'))]
-            if rounds and rel:                 # a theme: its last round; the earlier ones are linked from its index
-                r = max(rounds, key=natural)
-                found.append((rel, r, '%s/%s/index.html' % (rel, r), os.path.join(d, r, 'index.html'),
-                              '%s-%s-%s %s:%s' % (r[:4], r[4:6], r[6:8], r[9:11], r[11:13])))
-            dirs[:] = [x for x in dirs if not ROUND_RE.match(x)]     # the other files of a round are not rows
-            for f in sorted(files):
-                if not f.lower().endswith(('.html', '.htm')) or f == 'index.html' and (rounds or not rel):
-                    continue                   # the index of the rounds, and the root's own index
-                page = rel + '/' + f if rel else f
-                try:
-                    t = time.strftime('%Y-%m-%d %H:%M', time.localtime(os.path.getmtime(os.path.join(d, f))))
-                except OSError:
-                    continue
-                found.append((report_key(page), '', page, os.path.join(d, f), t))
-        owners = self.owners()
+        """The reports under the places, newest first."""
+        found = self.walk_reports()
+        owners, marks = self.owners(), self.marks()
         rows = []
         with self.cond:
-            for theme, r, page, full, t in found:
+            for theme, r, page, full, t, title, lang, pl in found:
                 s = self.stores.get(page)
                 if s is None and os.path.isfile(os.path.splitext(full)[0] + '.talk.json'):
                     try:
@@ -466,31 +798,40 @@ class Talk:
                 read = s.data['items'].get('read', {}).get('status', '') if s else ''
                 comments = [x['id'] for x in s.waiting_items() if any('text' in m for m in x['new'])] if s else []
                 owner = owners.get(theme, {}).get('name', '')
-                rows.append({'page': page, 'theme': theme, 'round': r, 'title': page_title(head(full)) or theme,
+                mk = marks.get(page, {})
+                tags = mk.get('tags') if isinstance(mk.get('tags'), list) else []
+                rows.append({'page': page, 'theme': theme, 'round': r, 'title': title or theme,
                              'owner': owner if isinstance(owner, str) else '', 'tracked': bool(r),
                              'status': read if r else '-', 'read': bool(r) and read in READ,
-                             'comments': comments, 'time': t})
+                             'comments': comments, 'time': t, 'lang': lang, 'place': pl.id, 'group': pl.group,
+                             'star': mk.get('star') is True, 'tags': [x for x in tags if isinstance(x, str)]})
         rows.sort(key=lambda x: x['time'], reverse=True)
-        return {'root': self.root.replace('\\', '/'), 'url': self.url, 'rows': rows}
+        return {'root': self.root and self.root.replace('\\', '/'), 'url': self.url, 'rows': rows,
+                'places': self.place_list()}
+
+    def place_list(self):
+        return [{'id': p.id, 'group': p.group, 'root': p.root.replace('\\', '/')} for p in self.places]
 
     def scan(self):
-        for d, dirs, files in os.walk(self.root):
-            dirs[:] = [x for x in dirs if not x.startswith('.') and x not in SKIP_DIRS]
-            for f in files:
-                page_file = os.path.join(d, f[:-len('.talk.json')] + '.html')
-                if f.endswith('.talk.json') and os.path.isfile(page_file):
-                    page = os.path.relpath(page_file, self.root).replace('\\', '/')
-                    try:
-                        self.stores[page] = Store(os.path.join(d, f), page)
-                    except (OSError, ValueError) as e:
-                        print('talkpage: skipped %s: %s' % (os.path.join(d, f), e), file=sys.stderr)
+        for pl in self.places:
+            for d, dirs, files in os.walk(pl.root):
+                dirs[:] = [x for x in dirs if not x.startswith('.') and x not in SKIP_DIRS]
+                for f in files:
+                    page_file = os.path.join(d, f[:-len('.talk.json')] + '.html')
+                    if f.endswith('.talk.json') and os.path.isfile(page_file):
+                        page = pl.key(os.path.relpath(page_file, pl.root).replace('\\', '/'))
+                        try:
+                            self.stores[page] = Store(os.path.join(d, f), page)
+                        except (OSError, ValueError) as e:
+                            print('talkpage: skipped %s: %s' % (os.path.join(d, f), e), file=sys.stderr)
 
     def html_pages(self):
         out = []
-        for d, dirs, files in os.walk(self.root) if self.root else ():
-            dirs[:] = [x for x in dirs if not x.startswith('.') and x not in SKIP_DIRS]
-            out += [os.path.relpath(os.path.join(d, f), self.root).replace('\\', '/') for f in files
-                    if f.lower().endswith(('.html', '.htm'))]
+        for pl in self.places:
+            for d, dirs, files in os.walk(pl.root):
+                dirs[:] = [x for x in dirs if not x.startswith('.') and x not in SKIP_DIRS]
+                out += [pl.key(os.path.relpath(os.path.join(d, f), pl.root).replace('\\', '/')) for f in files
+                        if f.lower().endswith(('.html', '.htm'))]
         return sorted(out)
 
     def attach(self, page, path):
@@ -499,17 +840,28 @@ class Talk:
             s = self.stores[page] = Store(path, page)
             return s
 
+    def locate(self, parts):
+        """(place, the parts under its folder) of a path's parts, or None: under --place the first part names the
+        place."""
+        if not self.multi:
+            return (self.places[0], parts) if self.places else None
+        for pl in self.places:
+            if parts and parts[0] == pl.id:
+                return pl, parts[1:]
+        return None
+
     def page_file(self, page):
         """(page path, file) for a page path from a URL or the command line, or ValueError."""
         p = urllib.parse.unquote(str(page or '')).replace('\\', '/').lstrip('/')
         if p == '' or p.endswith('/'):
             p += 'index.html'
         parts = p.split('/')
-        if (not self.root or any(s in ('', '.', '..') or s.startswith('.') for s in parts)
-                or not p.lower().endswith(('.html', '.htm'))):
+        hit = None if any(bad_part(s) for s in parts) else self.locate(parts)
+        if not hit or not hit[1] or not p.lower().endswith(('.html', '.htm')):
             raise ValueError('page: an .html path under the root: %s' % p)
-        full = os.path.realpath(os.path.join(self.root, *parts))
-        if not full.startswith(self.root + os.sep) or not os.path.isfile(full):
+        pl, rest = hit
+        full = os.path.realpath(os.path.join(pl.root, *rest))
+        if not full.startswith(pl.root + os.sep) or not os.path.isfile(full):
             raise ValueError('no such page: %s' % p)
         return p, full
 
@@ -564,7 +916,7 @@ class Talk:
             with self.cond:
                 now = time.time()
                 return 200, dump({'tool': 'talkpage', 'root': self.root and self.root.replace('\\', '/'),
-                                  'port': self.port, 'lang': self.lang, 'presence': self.presence(),
+                                  'places': self.place_list() if self.multi else [], 'port': self.port, 'lang': self.lang, 'presence': self.presence(),
                                   'name': self.name or '', 'url': self.url, 'local_url': self.local_url,
                                   'open': sorted(p for p, t in self.viewed.items() if now - t < OPEN_SECONDS),
                                   'pages': sorted(self.stores)})
@@ -628,6 +980,10 @@ class Talk:
         if path != '/_talk/api/ack' and not body.get('page'):
             raise ValueError('page is required')
         with self.cond:
+            if path == '/_talk/api/mark':          # the list of reports: a star, the tags
+                if not self.report_mode:
+                    return 404, dump({'error': 'the server runs without --reports'})
+                return 200, dump(self.mark(body.get('page'), body.get('star'), body.get('tags')))
             if path == '/_talk/api/user':
                 s = self.store(body.get('page'))
                 it = s.user(body.get('id'), body.get('title'), body.get('status'), body.get('comment'),
@@ -661,10 +1017,10 @@ class Talk:
                 if not os.path.isfile(s.path):
                     continue
                 n = len(s.waiting_items())
-                href = '/' + urllib.parse.quote(p) if self.root and not os.path.isabs(p) else None
+                href = '/' + urllib.parse.quote(p) if self.places and not os.path.isabs(p) else None
                 name = '<a href="%s">%s</a>' % (href, html.escape(p)) if href else html.escape(p)
                 rows.append('<li>%s%s</li>' % (name, m['unread'] % n if n else ''))
-            root = html.escape(self.root or '-')
+            root = html.escape(', '.join(pl.root for pl in self.places) or '-')
         return ('<!doctype html><html lang="%s"><head><meta charset="utf-8">%s<title>talkpage</title>%s'
                 '<style>:root{color-scheme:light dark}'
                 'body{font:15px/1.7 system-ui,sans-serif;margin:24px 16px;max-width:860px;overflow-wrap:break-word}'
@@ -674,29 +1030,18 @@ class Talk:
                    ''.join(rows) or '<li>%s</li>' % m['none'], m['note'])).encode('utf-8')
 
     def report_listing(self):
-        """The list of reports at / (--reports, the root has no index.html); every value is escaped."""
+        """The list of reports at / (--reports: a root without index.html, or the places): drawn by its script from
+        the rows of reports(), which go in as JSON; the stars, the tags and "read" are set from it."""
         m = REPORTS[self.lang]
-        rows = []
-        for x in self.reports()['rows']:
-            meta = ' · '.join(html.escape(v) for v in (x['theme'], x['round'], x['owner'] or m['no_owner'], x['time'])
-                              if v)
-            mark = '<b class="u">%s</b>' % m['unread'] if x['tracked'] and not x['read'] else ''
-            if x['comments']:
-                mark += '<span class="c">%s</span>' % html.escape(m['comments'] % ', '.join(x['comments']))
-            rows.append('<li><a href="/%s"><span class="t">%s</span>%s<span class="m">%s</span></a></li>'
-                        % (html.escape(urllib.parse.quote(x['page'])), html.escape(x['title']), mark, meta))
-        return ('<!doctype html><html lang="%s"><head><meta charset="utf-8">%s<title>%s</title>%s'
-                '<style>:root{color-scheme:light dark}'               # a whole row is the link: a finger-sized target
-                'body{font:15px/1.6 system-ui,sans-serif;margin:24px 16px;max-width:860px;overflow-wrap:break-word}'
-                'h1{font-size:22px}ul{list-style:none;margin:0;padding:0}li{border-top:1px solid #8884}'
-                'li a{display:block;padding:8px 2px;color:inherit;text-decoration:none}li a:hover .t{text-decoration:underline}'
-                '.t{font-weight:600;color:#0a5fb4}.u{margin-left:8px;font-size:12px;color:#cf222e}'
-                '.c{margin-left:8px;font-size:13px;color:#b45309}.m{display:block;color:#888;font-size:13px}'
-                '@media (prefers-color-scheme:dark){.t{color:#6cb6ff}.u{color:#f85149}.c{color:#d29922}}</style></head>'
-                '<body data-talk-listing><h1>%s</h1>'                      # no file behind it: no state, no items
-                '<p class="m">%s</p><ul>%s</ul></body></html>'
-                % (self.lang, VIEWPORT.decode(), html.escape(m['title']), FAVICON, html.escape(m['title']),
-                   m['meta'] % html.escape(self.root), ''.join(rows) or '<li>%s</li>' % m['none'])).encode('utf-8')
+        d = self.reports()
+        data = json.dumps({'rows': d['rows'], 'places': d['places'], 'multi': self.multi, 'read': READ, 'm': m},
+                          ensure_ascii=False).replace('<', '\\u003c')        # nothing in it ends the <script>
+        meta = m['places'] % len(self.places) if self.multi else m['meta'] % html.escape(self.root)
+        page = LISTING_PAGE
+        for k, v in (('LANG', self.lang), ('VIEWPORT', VIEWPORT.decode()), ('FAVICON', FAVICON),
+                     ('TITLE', html.escape(m['title'])), ('META', meta), ('DATA', data)):
+            page = page.replace('{{%s}}' % k, v)
+        return page.encode('utf-8')
 
 
 def dump(obj):
@@ -807,21 +1152,36 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, f.read(), TYPES[os.path.splitext(name)[1]])
         self._static(path)
 
+    def _index(self):
+        """/ of the root without index.html, and / of the places: the list of reports, else the pages with a state."""
+        if self.talk.report_mode:
+            return self._send(200, inject(self.talk.report_listing()), 'text/html')
+        return self._send(200, self.talk.listing(), 'text/html')
+
     def _static(self, raw):
-        root = self.talk.root
+        talk = self.talk
         parts = [s for s in urllib.parse.unquote(raw).split('/') if s]
-        if not root or any(s in ('.', '..') or s.startswith('.') or '\\' in s for s in parts):
+        if any(bad_part(s) for s in parts):
             return self._send(404, {'error': 'not found'})
-        full = os.path.realpath(os.path.join(root, *parts))
+        if talk.multi and not parts:
+            return self._index()
+        hit = talk.locate(parts)
+        if hit is None:                        # under --place: a path from before the places, if --fallback says where
+            if talk.fallback and parts:
+                return self._send(301, b'', 'text/plain', {'Location': quoted([talk.fallback] + parts, raw)})
+            return self._send(404, {'error': 'not found'})
+        pl, rest = hit
+        root = pl.root
+        full = os.path.realpath(os.path.join(root, *rest))
         if full != root and not full.startswith(root + os.sep):
             return self._send(404, {'error': 'not found'})
         if os.path.isdir(full):
             if not raw.endswith('/'):
-                return self._send(301, b'', 'text/plain', {'Location': raw + '/'})
+                return self._send(301, b'', 'text/plain', {'Location': quoted(parts, '/')})
             if not os.path.isfile(os.path.join(full, 'index.html')) and full == root:
-                if self.talk.report_mode:
-                    return self._send(200, inject(self.talk.report_listing()), 'text/html')
-                return self._send(200, self.talk.listing(), 'text/html')
+                if talk.multi and talk.report_mode:          # a place's own folder: its group in the list
+                    return self._send(302, b'', 'text/plain', {'Location': '/#' + pl.id})
+                return self._index()
             full = os.path.join(full, 'index.html')
         ctype = TYPES.get(os.path.splitext(full)[1].lower())
         if not ctype or not os.path.isfile(full):
@@ -878,9 +1238,13 @@ def call(a, path, body=None, timeout=15, **q):
 
 
 def cmd_serve(a):
-    root = os.path.realpath(a.root)
-    if not os.path.isdir(root):
-        raise SystemExit('talkpage: not a folder: %s' % a.root)
+    if bool(a.root) == bool(a.place):
+        raise SystemExit('talkpage: serve <root>, or serve --place [GROUP:]ID=FOLDER ... (not both)')
+    places = [parse_place(x) for x in a.place or ()]
+    for _, _, folder in places or [('', '', a.root)]:
+        if not os.path.isdir(folder):
+            raise SystemExit('talkpage: not a folder: %s' % folder)
+    root = os.path.realpath(a.root) if a.root else None
     name = check_name(a.name) if a.name else None
     remote = None
     if a.tailscale:
@@ -888,7 +1252,11 @@ def cmd_serve(a):
         if not remote[0]:
             print('talkpage: not on the tailnet: %s' % remote[1], file=sys.stderr, flush=True)
             remote = None
-    talk = Talk(root, a.port, a.lang or default_lang('TALKPAGE_LANG'), name, a.reports, remote)
+    try:
+        talk = Talk(root, a.port, a.lang or default_lang('TALKPAGE_LANG'), name, a.reports, remote, places,
+                    a.fallback, a.marks)
+    except ValueError as e:
+        raise SystemExit('talkpage: %s' % e)
     Handler.talk = talk
     try:
         srv = Server(('127.0.0.1', a.port), Handler)
@@ -906,10 +1274,10 @@ def cmd_serve(a):
                   file=sys.stderr, flush=True)
     url = talk.url
     print('talkpage: %s at %s%s (%d pages with a state%s). Ctrl-C to stop.'
-          % (root, url, ' and ' + talk.local_url if talk.remote else '', len(talk.stores),
+          % (root or ', '.join('/%s/ %s' % (p.id, p.root) for p in talk.places), url, ' and ' + talk.local_url if talk.remote else '', len(talk.stores),
              ', reports' if talk.report_mode else ''), flush=True)
     if a.open:
-        page = os.path.relpath(os.path.realpath(a.open), root) if os.path.isabs(a.open) else a.open
+        page = os.path.relpath(os.path.realpath(a.open), root) if root and os.path.isabs(a.open) else a.open
         p, _ = talk.page_file(page)
         webbrowser.open(url + urllib.parse.quote(p))
     try:
@@ -1070,7 +1438,11 @@ def cmd_reports(a):
         theme, name, sid = args
         if theme not in by_theme:
             raise SystemExit('talkpage: no such theme: %s' % theme)
-        path = os.path.join(d['root'], 'owners.json')
+        folder, key = d['root'], theme                          # under --place: that place's owners.json
+        for pl in d.get('places') or []:
+            if pl['id'] and theme.startswith(pl['id'] + '/'):
+                folder, key = pl['root'], theme[len(pl['id']) + 1:]
+        path = os.path.join(folder, 'owners.json')
         owners = {}
         if os.path.isfile(path):
             with open(path, encoding='utf-8') as f:
@@ -1080,7 +1452,7 @@ def cmd_reports(a):
                     raise SystemExit('talkpage: %s is not JSON (%s); fix or remove it' % (path, e))
             if not isinstance(owners, dict):
                 raise SystemExit('talkpage: %s is not a JSON object' % path)
-        owners[theme] = {'name': name, 'id': sid}
+        owners[key] = {'name': name, 'id': sid}
         tmp = path + '.tmp'
         with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
             json.dump(owners, f, ensure_ascii=False, indent=1, sort_keys=True)
@@ -1091,7 +1463,7 @@ def cmd_reports(a):
         for x in tracked(args):
             status = ''
             if act == 'read':                                       # in the page's language, like its buttons
-                lang = page_lang(head(os.path.join(d['root'], *x['page'].split('/'))))
+                lang = x.get('lang') or ''
                 status = READ[0] if lang.startswith('ja') else READ[1]
             call(a, '/_talk/api/agent', {'page': x['page'], 'id': 'read', 'status': status})
             print('talkpage: %s  [%s]' % (x['page'], status or '-'))
@@ -1117,7 +1489,11 @@ def main():
     p.add_argument('--port', type=int, default=PORT)
     sub = p.add_subparsers(dest='cmd', required=True)
     s = sub.add_parser('serve', help='serve the pages under a folder')
-    s.add_argument('root')
+    s.add_argument('root', nargs='?')
+    s.add_argument('--place', action='append',
+                   help='[GROUP:]ID=FOLDER instead of <root>, repeated: the folder at /ID/, headed GROUP in the list')
+    s.add_argument('--fallback', help='under --place: a path whose first part is no place goes to /FALLBACK/<path>')
+    s.add_argument('--marks', help='the stars and tags of the list (default ~/.talkpage/marks-<port>.json)')
     s.add_argument('--open', help='open this page (path under the root, or the file) in the default browser')
     s.add_argument('--lang', choices=LANGS,
                    help='language of the index page (default: $TALKPAGE_LANG, else ja for a Japanese OS, else en)')

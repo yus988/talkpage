@@ -191,6 +191,7 @@ body { padding-bottom: 64px; }
 .talk-sb-gunread { font-size: 11px; font-weight: 600; color: var(--talk-accent); }
 .talk-sb-row, .talk-toc { display: block; padding: 2px 6px 3px 16px; border-radius: 4px; color: var(--talk-fg); text-decoration: none; }
 .talk-sb-row:hover, .talk-toc:hover { background: var(--talk-user-bg); }
+.talk-sb-all { padding-left: 6px; margin-bottom: 4px; color: var(--talk-accent); }
 .talk-sb-t { display: block; overflow-wrap: anywhere; }
 .talk-sb-meta { display: block; font-size: 11px; color: var(--talk-muted); }
 .talk-sb-row.talk-unread .talk-sb-t { font-weight: 700; }

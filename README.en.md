@@ -33,6 +33,7 @@ Python 3.9 or later is needed.
 
 ```
 talkpage serve <root> [--port 8190] [--open <page>] [--name <name>.localhost] [--reports] [--tailscale]
+talkpage serve --place [<heading>:]<id>=<folder> ... [--fallback <id>] [--marks <file>] --reports ...
 ```
 
 - `<root>`: the folder that holds the pages (e.g. a notes folder of your workspace). An HTML file under it opens at
@@ -51,6 +52,8 @@ talkpage serve <root> [--port 8190] [--open <page>] [--name <name>.localhost] [-
   no hosts entry is needed. When port 80 is taken it says so in one line and the pages are at
   `http://<name>.localhost:<port>/`. The agent's commands keep using `127.0.0.1:<port>`. Other names are refused
 - `--reports`: the root holds reports (see "Reports" below)
+- `--place [<heading>:]<id>=<folder>` (instead of `<root>`, repeated): one server for several folders (see "Several
+  folders" below)
 - `--tailscale`: open the pages from a phone or another PC through a [Tailscale](https://tailscale.com/kb/1312/serve)
   tailnet (a private network of your own devices) (see "From outside" below)
 
@@ -209,6 +212,35 @@ page (key: its folder for an `index.html`, else its path). Folders starting with
 without `<meta name="viewport">` gets one too (without it a phone lays the page out wider than the screen and it slides
 sideways). Without an `index.html` at the root, `/` is the list of reports.
 
+**Several folders (`--place`)**: the reports of several workspaces on one server, in one list. The files stay where
+they are; the server is told where they are.
+
+```
+talkpage serve --reports --place "ws-a:notes=C:/ws-a/dev-notes" --place "ws-a:proposals=C:/ws-a/docs/proposals" --place "ws-b:outputs=C:/ws-b/outputs" --fallback notes
+```
+
+- Each folder is at `/<id>/` (id: lower-case letters, digits and `-`, not shaped like a round). A page path becomes
+  `<id>/<path under the folder>`; `.talk.json` stays beside the page and `owners.json` in each folder (keys without
+  the id)
+- `<heading>` groups folders in the list (default: the id); several folders may share one
+- `/` is always the list. `/<id>/` goes to that heading of the list when the folder has no `index.html`
+- `--fallback <id>`: a path whose first part is no id goes to `/<id>/<path>` (links from the days of one root)
+- Rounds right under a folder make the folder itself the theme
+- The walk of the folders is reused for 5 s (each page's sidebar asks every 30 s). Do not give a big folder (a whole
+  synced drive); give the folder under it that holds the reports
+
+**The list** (`/`): grouped by heading, each folded by a tap ("By place"), or everything newest first ("Newest"; the
+switch shows under `--place` only). The bar filters by "All", "Unread", "★ Later" and each tag. The buttons of a row:
+
+- ☆ / ★: a mark for "look again later"
+- `#`: tags (type them separated by commas; empty removes them; up to 8, each up to 24 characters)
+- Mark read / Unread: "Read" of a theme with rounds (the same as the item at the end of its page; does not wake the
+  agent)
+
+Stars and tags are kept in one file (`--marks`, default `~/.talkpage/marks-<port>.json`), not beside the reports: your
+own marks, kept out of git. The view, the filter and the folds stay in this browser. Each report's sidebar starts with
+a link to the list and marks starred rows with ★; under `--place` it groups the reports by heading too.
+
 **On the page**
 
 - Selecting text shows a "Comment" button (on a phone: select by a long press, and it shows below the selection once
@@ -241,7 +273,7 @@ sideways). Without an `index.html` at the root, `/` is the list of reports.
 | | |
 |---|---|
 | `talkpage reports` / `reports list` | unread (oldest first), read and single pages as `theme<TAB>round<TAB>owner<TAB>title`, with ` [comments: C1,C2]` for unanswered comments and ` [open]` for pages open in a tab |
-| `reports owner <theme> <name> <id>` | write the theme's owner (the name and id of the session that wrote it) to `<root>/owners.json` |
+| `reports owner <theme> <name> <id>` | write the theme's owner (the name and id of the session that wrote it) to `<root>/owners.json` (under `--place`: to the `owners.json` of the folder whose id starts the theme, keyed without the id) |
 | `reports read <theme>…` / `reports read all` / `reports unread <theme>…` | set or clear "Read" on the last round |
 | `reports open [--owner text]` | open the unread pages in the default browser (not those already open in a tab); with `--owner`, the themes whose owner contains the text, read or not |
 
@@ -287,9 +319,10 @@ send `Origin: http://127.0.0.1:<port>` (see "Safety").
 
 | | |
 |---|---|
-| `GET /_talk/api/info` | root, port, the agent's state (`listening` / `working` / `absent`), pages with a state, `name`, `url` (where the user reads; the tailnet address with `--tailscale`), `local_url` (this PC's own address), `open` (pages that asked `state` with `open=1` in the last 90 s, i.e. open in a browser tab) |
+| `GET /_talk/api/info` | root (under `--place`: `places: [{id, group, root}]`), port, the agent's state (`listening` / `working` / `absent`), pages with a state, `name`, `url` (where the user reads; the tailnet address with `--tailscale`), `local_url` (this PC's own address), `open` (pages that asked `state` with `open=1` in the last 90 s, i.e. open in a browser tab) |
 | `GET /_talk/api/state?page=P` | All items of a page. With `&rev=N&wait=25` (and `&presence=…`) it waits up to that many seconds for the revision (or the agent's state) to change. `&open=1` counts the page as open |
-| `GET /_talk/api/reports` | Under `--reports` only: `{root, url, rows: [{page, theme, round, title, owner, tracked, status, read, comments, time}]}`, newest first |
+| `GET /_talk/api/reports` | Under `--reports` only: `{root, url, places, rows: [{page, theme, round, title, owner, tracked, status, read, comments, time, lang, place, group, star, tags}]}`, newest first |
+| `POST /_talk/api/mark` `{page, star?, tags?}` | Under `--reports` only: the star (`true` / `false`) and the tags (a list of strings; `[]` removes them) of the list; what is left out stays |
 | `GET /_talk/api/pending[?page=P]` | Items unread by the agent and each one's new user actions (`new`). `wait` uses `&wait=50&listen=1` (shows "listening" meanwhile; what it printed is not printed again) and `&take=1` |
 | `POST /_talk/api/user` `{page, id, title?, status?, comment?, notify?}` | A user action (sent by the page). `status: ""` clears; `notify: false` does not wake the agent |
 | `POST /_talk/api/seen` `{page, id}` | The user read the agent's message |
@@ -322,7 +355,9 @@ seen take the exact path only.
 - Every HTML file under root has the same origin and can post comments as the user. Keep only pages the agent made
   under root, not downloaded HTML or saved pages of other sites. Put text taken from outside (mail, the web,
   datasheets) into a page as text, not as HTML
-- Files are served from under root only (`..` and names starting with `.` are refused). The only files written are
+- Files are served from under root (under `--place`: each folder) only (`..`, names starting with `.`, and names with
+  `\` or `:` are refused, as is a real path outside the folder through a link). A redirect goes only to our own path
+  made from the request's (never `//<host>`). The only files written are
   the `.talk.json` beside pages that exist under root
 - Messages are always inserted as text (only line breaks, `` `code` `` and http(s) links are formatted)
 
