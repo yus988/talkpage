@@ -533,6 +533,7 @@
   var draft = null;         // the card of a comment not sent yet (not on the server)
   var openNow = null, big = null, showResolved = false;
   var layer = null, selBtn = null, content = null, layoutQueued = false;
+  var touched = false, selTimer = 0;            // the last pointer was a finger; the wait for a touch selection
   var marks = !!(window.CSS && CSS.highlights && typeof Highlight === 'function');
 
   function ours(node) {
@@ -997,7 +998,7 @@
     var base = layer.getBoundingClientRect(), vw = document.documentElement.clientWidth;
     selBtn.hidden = false;
     selBtn.style.left = Math.max(4, Math.min(last.right + 4, vw - selBtn.offsetWidth - 8)) - base.left + 'px';
-    selBtn.style.top = last.bottom + 4 - base.top + 'px';
+    selBtn.style.top = last.bottom + (touched ? 28 : 4) - base.top + 'px';     // below a phone's selection handle
     selBtn.sel = { scope: s, range: r.cloneRange(), text: sel.toString() };
   }
 
@@ -1064,11 +1065,21 @@
     layer.appendChild(selBtn);
     selBtn.addEventListener('mousedown', function (e) { e.preventDefault(); });    // keeps the selection
     selBtn.addEventListener('click', function () { if (selBtn.sel) newDraft(selBtn.sel); });
-    document.addEventListener('mouseup', function () { setTimeout(onSelect, 0); });
+    // a touch selection (long press, then the handles) sends no mouseup: follow selectionchange once it settles.
+    // A tap on the button would clear the selection before its click, so the touch itself opens the draft
+    selBtn.addEventListener('touchstart', function (e) { e.preventDefault(); }, { passive: false });
+    selBtn.addEventListener('touchend', function (e) {
+      e.preventDefault();
+      if (selBtn.sel) newDraft(selBtn.sel);
+    });
+    document.addEventListener('pointerdown', function (e) { touched = e.pointerType === 'touch'; }, true);
+    document.addEventListener('mouseup', function () { if (!touched) setTimeout(onSelect, 0); });
     document.addEventListener('keyup', function (e) { if (!ours(e.target)) onSelect(); });
     document.addEventListener('selectionchange', function () {
       var sel = getSelection();
       if (!sel || sel.isCollapsed) selBtn.hidden = true;
+      clearTimeout(selTimer);
+      if (touched && sel && !sel.isCollapsed) selTimer = setTimeout(onSelect, 400);
     });
     document.addEventListener('mousedown', onDown);
     document.addEventListener('click', onClick);

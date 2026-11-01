@@ -2,6 +2,7 @@
 """talkpage: local web pages where the user marks items and writes comments, and a coding agent is woken to answer.
 
   python talkpage.py serve <root> [--port 8190] [--open PAGE] [--lang en|ja] [--name NAME.localhost] [--reports]
+                           [--tailscale]
   python talkpage.py wait  [--page P] [--settle 4] [--json]
   python talkpage.py reply --page P --id ID [--status S] [--text T | --text - | --file F] [--fields JSON] [--summary S]
   python talkpage.py ack   [--page P] [--id ID ...]
@@ -19,13 +20,20 @@ follows the <html lang> of each page. The page side is talkpage.js / talkpage.cs
 be had; browsers send *.localhost to this PC). --reports: the root holds reports, <theme>/<YYYYMMDD-HHMM-rN>/index.html
 or <theme>/index.html; the server lists them (/_talk/api/reports, and / when the root has no index.html) and adds
 talkpage.js to every page it serves. reports: list them, set a theme's owner session (owners.json), mark them read.
+--tailscale: also take the requests that Tailscale serve proxies from this PC's tailnet name (set it with
+`tailscale serve --bg --https=443 http://127.0.0.1:<port>`) when they carry the login of this PC's own user; the
+address the user reads becomes https://<PC>.<tailnet>.ts.net/, which the user's phone opens too.
 """
 import argparse
+import email.errors
+import email.header
 import html
 import json
 import locale
 import os
 import re
+import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -104,10 +112,52 @@ def check_name(name):
     return n
 
 
-def own_origins(port, name=None):
-    """The origins of this server's pages on one listener: 127.0.0.1, localhost and the --name, without :80."""
+def own_origins(port, name=None, remote=None):
+    """The origins of this server's pages on one listener: 127.0.0.1, localhost and the --name, without :80, and the
+    tailnet origin of --tailscale."""
     suffix = '' if port == 80 else ':%d' % port
-    return tuple('http://%s%s' % (h, suffix) for h in ('127.0.0.1', 'localhost') + ((name,) if name else ()))
+    own = tuple('http://%s%s' % (h, suffix) for h in ('127.0.0.1', 'localhost') + ((name,) if name else ()))
+    return own + ((remote,) if remote else ())
+
+
+def serve_origin(serve, port):
+    """The origin at which `tailscale serve status --json` (parsed) proxies the root path to 127.0.0.1:<port>, such
+    as https://pc.tail1234.ts.net, or None. Only a proxy of / counts: the pages ask for absolute paths."""
+    targets = ('http://127.0.0.1:%d' % port, 'http://localhost:%d' % port)
+    for hostport, web in ((serve or {}).get('Web') or {}).items():
+        proxy = (((web or {}).get('Handlers') or {}).get('/') or {}).get('Proxy') or ''
+        if proxy.rstrip('/').lower() not in targets:
+            continue
+        host, _, p = hostport.rpartition(':')
+        tls = ((serve.get('TCP') or {}).get(p) or {}).get('HTTPS')
+        scheme, default = ('https', '443') if tls else ('http', '80')
+        return '%s://%s%s' % (scheme, host.lower(), '' if p == default else ':' + p)
+    return None
+
+
+def tailscale(port):
+    """(origin, login) when Tailscale serve proxies this PC's tailnet name to 127.0.0.1:<port>: the origin of
+    serve_origin() and the login name of this PC's own user. Else (None, why)."""
+    exe = shutil.which('tailscale') or r'C:\Program Files\Tailscale\tailscale.exe'
+    if not os.path.isfile(exe):
+        return None, 'the tailscale command is not installed'
+
+    def run(*args):
+        r = subprocess.run([exe] + list(args), capture_output=True, timeout=15)
+        return json.loads(r.stdout.decode('utf-8') or 'null')
+    try:
+        st, serve = run('status', '--json'), run('serve', 'status', '--json')
+        me = st['Self']
+        login = st['User'][str(me['UserID'])]['LoginName']
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as e:
+        return None, 'tailscale status failed (%s)' % e
+    if st.get('BackendState') != 'Running':
+        return None, 'Tailscale is %s' % st.get('BackendState')
+    origin = serve_origin(serve, port)
+    if not origin:
+        return None, 'nothing serves 127.0.0.1:%d; set it with: tailscale serve --bg --https=443 http://127.0.0.1:%d' \
+            % (port, port)
+    return origin, login
 
 
 def head(path, n=65536):
@@ -327,12 +377,13 @@ class Talk:
     """The stores under one root, the agent's presence, and the /_talk/api/ routes. Another server can host stores
     kept at its own paths (attach) and hand /_talk/api/ requests to get() / post()."""
 
-    def __init__(self, root=None, port=PORT, lang='en', name=None, reports=False):
+    def __init__(self, root=None, port=PORT, lang='en', name=None, reports=False, remote=None):
         self.root = os.path.realpath(root) if root else None
         self.port = port
         self.lang = lang if lang in LANGS else 'en'      # of the index page; the pages carry their own <html lang>
         self.name = name or None                         # --name, checked by check_name()
         self.on80 = False                                # a second listener serves the name on port 80
+        self.remote, self.remote_login = remote or (None, None)     # --tailscale: (origin, login) of tailscale()
         self.report_mode = bool(reports and self.root)
         self.viewed = {}                                 # page -> when a page last asked for its state with open=1
         self.cond = threading.Condition()
@@ -347,7 +398,13 @@ class Talk:
 
     @property
     def url(self):
-        """The address the user reads: http://NAME/ when port 80 serves it, else http://NAME:<port>/ or 127.0.0.1."""
+        """The address the user reads: the tailnet one of --tailscale (this PC's browser and the phone both open it),
+        else local_url."""
+        return self.remote + '/' if self.remote else self.local_url
+
+    @property
+    def local_url(self):
+        """This PC's address: http://NAME/ when port 80 serves it, else http://NAME:<port>/ or 127.0.0.1."""
         if self.name:
             return 'http://%s/' % self.name if self.on80 or self.port == 80 else 'http://%s:%d/' % (self.name, self.port)
         return 'http://127.0.0.1:%d/' % self.port
@@ -497,7 +554,7 @@ class Talk:
                 now = time.time()
                 return 200, dump({'tool': 'talkpage', 'root': self.root and self.root.replace('\\', '/'),
                                   'port': self.port, 'lang': self.lang, 'presence': self.presence(),
-                                  'name': self.name or '', 'url': self.url,
+                                  'name': self.name or '', 'url': self.url, 'local_url': self.local_url,
                                   'open': sorted(p for p, t in self.viewed.items() if now - t < OPEN_SECONDS),
                                   'pages': sorted(self.stores)})
         if path == '/_talk/api/reports':
@@ -662,9 +719,14 @@ class Handler(BaseHTTPRequestHandler):
         POST, other sites' fetches): ours or nothing. Sec-Fetch-Site (also <img>, <script>, forms): another site may
         open a page by a link and nothing else. What acts needs our Origin, or a request of our page (same-origin,
         or our Referer in a browser without Sec-Fetch-Site); clients without a browser send Origin (call())."""
-        own = own_origins(self.server.server_address[1], self.talk.name)
+        port = self.server.server_address[1]
+        remote = self.talk.remote if port == self.talk.port else None     # Tailscale serve proxies to --port
+        own = own_origins(port, self.talk.name, remote)
         h = self.headers
-        if (h.get('Host') or '').lower() not in [o[len('http://'):] for o in own]:
+        host = (h.get('Host') or '').lower()
+        if host not in [urllib.parse.urlsplit(o).netloc for o in own]:
+            return False
+        if remote and host == urllib.parse.urlsplit(remote).netloc and not self._own_user():
             return False
         origin = (h.get('Origin') or '').lower()
         if origin:
@@ -678,6 +740,19 @@ class Handler(BaseHTTPRequestHandler):
         if ref and ref not in own:
             return False
         return not self._acts(path, q) or site == 'same-origin' or bool(ref)
+
+    def _own_user(self):
+        """A request by the tailnet name comes through Tailscale serve, which drops these headers from what a device
+        sends and sets them itself: the login of the device's user, or Tailscale-Funnel-Request from the internet
+        (and no login from a tagged device). Only this PC's own user passes."""
+        h = self.headers
+        if h.get('Tailscale-Funnel-Request'):
+            return False
+        try:
+            login = str(email.header.make_header(email.header.decode_header(h.get('Tailscale-User-Login') or '')))
+        except (email.errors.HeaderParseError, LookupError, UnicodeDecodeError):
+            return False
+        return bool(login) and login.lower() == self.talk.remote_login.lower()
 
     def _run(self, fn):
         try:
@@ -790,7 +865,13 @@ def cmd_serve(a):
     if not os.path.isdir(root):
         raise SystemExit('talkpage: not a folder: %s' % a.root)
     name = check_name(a.name) if a.name else None
-    talk = Talk(root, a.port, a.lang or default_lang('TALKPAGE_LANG'), name, a.reports)
+    remote = None
+    if a.tailscale:
+        remote = tailscale(a.port)
+        if not remote[0]:
+            print('talkpage: not on the tailnet: %s' % remote[1], file=sys.stderr, flush=True)
+            remote = None
+    talk = Talk(root, a.port, a.lang or default_lang('TALKPAGE_LANG'), name, a.reports, remote)
     Handler.talk = talk
     try:
         srv = Server(('127.0.0.1', a.port), Handler)
@@ -807,8 +888,9 @@ def cmd_serve(a):
             print('talkpage: port 80 is not free (%s); the pages are at http://%s:%d/' % (e, name, a.port),
                   file=sys.stderr, flush=True)
     url = talk.url
-    print('talkpage: %s at %s (%d pages with a state%s). Ctrl-C to stop.'
-          % (root, url, len(talk.stores), ', reports' if talk.report_mode else ''), flush=True)
+    print('talkpage: %s at %s%s (%d pages with a state%s). Ctrl-C to stop.'
+          % (root, url, ' and ' + talk.local_url if talk.remote else '', len(talk.stores),
+             ', reports' if talk.report_mode else ''), flush=True)
     if a.open:
         page = os.path.relpath(os.path.realpath(a.open), root) if os.path.isabs(a.open) else a.open
         p, _ = talk.page_file(page)
@@ -1026,6 +1108,8 @@ def main():
                    help='also serve at http://NAME/, a name ending in .localhost (default: $TALKPAGE_NAME)')
     s.add_argument('--reports', action='store_true',
                    help='the root holds reports: list them at / and add talkpage.js to the pages')
+    s.add_argument('--tailscale', action='store_true',
+                   help="also serve what Tailscale serve proxies here, to this PC's own user (phone, other PCs)")
     s = sub.add_parser('wait', help='block until the user acts, print it, exit')
     s.add_argument('--page', help='only this page (path or a unique part of it)')
     s.add_argument('--settle', type=float, default=4.0, help='seconds without new clicks before printing (default 4)')

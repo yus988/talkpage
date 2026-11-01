@@ -6,7 +6,7 @@
 
 - 新しいページは、項目に `data-talk="<id>"` を付けるだけ（JSON でも宣言できる）。状態のボタン・コメントのやりとり・エージェントの在・不在の表示が付く
 - 状態とやりとりは、ページの横の `<ページ名>.talk.json` に保存する（ブラウザには残さない。書きかけのコメントだけ、そのブラウザの localStorage に残す）
-- サーバーは `127.0.0.1` だけで待ち受け、外へは何も送らない。Python 3.9+ の標準ライブラリだけ。ページは CDN を使わない
+- サーバーは `127.0.0.1` だけで待ち受け、外へは何も送らない（スマホから開くときは Tailscale を使う。「外から開く」）。Python 3.9+ の標準ライブラリだけ。ページは CDN を使わない
 - エージェントは `talkpage wait` を background で動かして待つ。ユーザーが書くと、その内容を表示して終了し、その終了でエージェントが起きる（Claude Code なら Bash の `run_in_background`）
 
 KiCad の回路図と基板のレビューのページ [kicad-review](https://github.com/yus988/kicad-review) の、KiCad に依存しない部分（項目ごとの状態とやりとりの保存、返信待ちの一覧、待ちのコマンド、エージェントの返信）を切り出したもの。実機の検証の手順、レビューの指摘、質問の一覧、チェックリストなど、ユーザーに項目ごとの結果や判断を返してもらうページに使う。
@@ -22,7 +22,7 @@ pipx install git+https://github.com/yus988/talkpage
 ## 起動
 
 ```
-talkpage serve <root> [--port 8190] [--open <ページ>] [--name <名前>.localhost] [--reports]
+talkpage serve <root> [--port 8190] [--open <ページ>] [--name <名前>.localhost] [--reports] [--tailscale]
 ```
 
 - `<root>`: ページを置くフォルダ（例: workspace の作業メモのフォルダ）。その下の HTML を `http://127.0.0.1:8190/<root からのパス>` で開ける。案件のページとデータは使う側の workspace に置き、ツールの repo には入れない
@@ -33,6 +33,24 @@ talkpage serve <root> [--port 8190] [--open <ページ>] [--name <名前>.localh
 - ポートは `--port` か環境変数 `TALKPAGE_PORT`（既定 8190）。`wait` / `reply` / `ack` / `show` / `reports` も同じ値を使う
 - `--name <名前>.localhost`（既定は環境変数 `TALKPAGE_NAME`）: ページを `http://<名前>.localhost/` でも配る（`127.0.0.1:80` に 2 本目の待ち受けを立てる）。ブラウザは `*.localhost` を必ずこの PC に向けるので、hosts の設定は要らない。ポート 80 が使えなければ 1 行の注意を出し、`http://<名前>.localhost:<port>/` になる。エージェントのコマンドは今までどおり `127.0.0.1:<port>` を使う。`.localhost` で終わらない名前は拒否する
 - `--reports`: root をレポートの置き場として扱う（下の「レポートの読み場」）
+- `--tailscale`: スマホや外の PC から、[Tailscale](https://tailscale.com/kb/1312/serve) の tailnet（自分の端末だけの私設の網）を通して開けるようにする（下の「外から開く」）
+
+## 外から開く（`--tailscale`）
+
+PC を付けたままにして、外出先のスマホ・PC から同じページを読み、コメントを書く。インターネットには出さない。
+
+1. PC とスマホに Tailscale を入れ、同じアカウントでログインする
+2. PC で、tailnet の名前の `/` を talkpage へ流す設定をする（PC を再起動しても残る）。初回は HTTPS の証明書を有効にするリンクが出るので、開いて有効にする（証明書を取ると、PC の tailnet の名前 `<PC>.<tailnet>.ts.net` が証明書の公開記録に載る）
+
+   ```
+   tailscale serve --bg --https=443 http://127.0.0.1:8190
+   ```
+
+3. `talkpage serve <root> --tailscale ...` で起動する。ユーザーが読むアドレス（`info` の `url`）が `https://<PC>.<tailnet>.ts.net/` になり、PC のブラウザもスマホもこれを開く。この PC だけのアドレスは `local_url`
+
+- 起動の時に `tailscale status --json` と `tailscale serve status --json` を読み、`/` が `127.0.0.1:<port>` へ流れていることと、この PC の持ち主のログイン名を確かめる。流れていなければ 1 行の注意を出し、今までどおりこの PC だけで配る（設定した後で起動し直す）
+- tailnet の名前で来た要求は、Tailscale serve が付ける `Tailscale-User-Login` がこの PC の持ち主のときだけ通す（serve は端末が送ったこのヘッダーを消して付け直す）。共有された他人の端末、タグ付きの端末（ログインが付かない）、Funnel（インターネットから。`Tailscale-Funnel-Request` が付く）は 403
+- 止めるときは `tailscale serve --https=443 off`
 
 ## ページの作り方
 
@@ -137,7 +155,7 @@ talkpage serve <レポートの置き場> --reports --name notes.localhost
 
 **画面**
 
-- 本文の文字を選ぶと「コメント」のボタンが出る。押すと右の余白にカードが開き、最初に送った時にその項目（`C1`・`C2`…。題は選んだ文字）ができる。送らずに離れる（ほかの所を押す・Esc）と消える
+- 本文の文字を選ぶと「コメント」のボタンが出る（スマホでは長押しで選び、範囲を決めて指を止めると、選んだ所の下に出る）。押すと右の余白にカードが開き、最初に送った時にその項目（`C1`・`C2`…。題は選んだ文字）ができる。送らずに離れる（ほかの所を押す・Esc）と消える
 - コメントを付けた文字に黄色の印（開いているカードの印は濃く。CSS Custom Highlight API）。印を押すとカードが開く。本文から文字が消えたコメントは、末尾の「本文で見つからないコメント」に並ぶ
 - 閉じたカードには、エージェントの要約（`reply --summary`。3 行まで）か最後の発言の 1 行目が出る。開いたカードの枠か ⤢ で、やりとりの全文を画面の中央に出す（背景か Esc で戻る）。右の余白が 240 px 未満のときは、右端に番号だけを並べる
 - 「解決」でカードと印を隠す（エージェントは起こさない）。dock の「解決済み n」で薄く出し、「戻す」で元に戻す
@@ -191,7 +209,7 @@ talkpage serve <レポートの置き場> --reports --name notes.localhost
 
 | | |
 |---|---|
-| `GET /_talk/api/info` | root、ポート、エージェントの状態（`listening` / `working` / `absent`）、状態のあるページ、`name`・`url`（ユーザーが読むアドレス）、`open`（90 秒以内に `state` を `open=1` 付きで聞いたページ = ブラウザのタブで開いているページ） |
+| `GET /_talk/api/info` | root、ポート、エージェントの状態（`listening` / `working` / `absent`）、状態のあるページ、`name`・`url`（ユーザーが読むアドレス。`--tailscale` なら tailnet のアドレス）・`local_url`（この PC だけのアドレス）、`open`（90 秒以内に `state` を `open=1` 付きで聞いたページ = ブラウザのタブで開いているページ） |
 | `GET /_talk/api/state?page=P` | ページの全項目。`&rev=N&wait=25`（と `&presence=…`）を付けると、版（とエージェントの状態）が変わるまで最大その秒数待つ。`&open=1` でそのページを「開いている」とする |
 | `GET /_talk/api/reports` | `--reports` のときだけ。レポートの一覧 `{root, url, rows: [{page, theme, round, title, owner, tracked, status, read, comments, time}]}`（新しい順） |
 | `GET /_talk/api/pending[?page=P]` | エージェント未読の項目と、各項目の新しいユーザーの操作（`new`）。`wait` の内部で `&wait=50&listen=1`（待っている間は「受付中」、出したものは再び出さない）と `&take=1` を使う |
@@ -205,10 +223,11 @@ agent・ack・state・pending の `page` は、パスの一部（状態のある
 
 ## 安全
 
-- 待ち受けは `127.0.0.1` だけ。CORS のヘッダーは付けない（別のサイトの `fetch` は応答を読めず、preflight の `OPTIONS` は 501）
+- 待ち受けは `127.0.0.1` だけ（`--tailscale` でも同じ。外からの要求は Tailscale serve が中継する）。CORS のヘッダーは付けない（別のサイトの `fetch` は応答を読めず、preflight の `OPTIONS` は 501）
 - 次は 403（`Handler._local`）:
-  - `Host` が `127.0.0.1:<port>` / `localhost:<port>`（と `--name` の `<名前>:<port>`。ポート 80 の待ち受けでは `:80` 無し）以外（DNS rebinding）
-  - `Origin` が同じ組み合わせの `http://…` 以外（別のサイトのページ。`null` も）
+  - `Host` が `127.0.0.1:<port>` / `localhost:<port>`（と `--name` の `<名前>:<port>`。ポート 80 の待ち受けでは `:80` 無し。`--tailscale` なら tailnet の名前）以外（DNS rebinding）
+  - tailnet の名前で来て、`Tailscale-User-Login` がこの PC の持ち主でないもの、`Tailscale-Funnel-Request` が付いたもの（「外から開く」）
+  - `Origin` が同じ組み合わせの `http://…`（tailnet は `https://…`）以外（別のサイトのページ。`null` も）
   - ブラウザが `Sec-Fetch-Site: cross-site` / `same-site` を付けた要求。別のサイトからは、リンクでページを開くこと（最上位の画面の移動）だけを通す。`<img>`・`<script>`・iframe・`fetch` は通さない
   - 状態を変える要求（POST・DELETE と、`wait` が項目を受け取る `pending?listen=1` / `take=1`）で、`Origin` が無く、ページからの要求の印（`Sec-Fetch-Site: same-origin`、または自分の `Referer`）も無いもの。ブラウザの外のクライアントは `Origin: http://127.0.0.1:<port>` を付ける（`talkpage` のコマンドは付けている）。読むだけの GET（`info`・`state`）は、ヘッダー無しの curl でも読める
 - POST は JSON だけなので、別のサイトのフォーム（`text/plain` 等）からは送れない。ページは `X-Frame-Options: SAMEORIGIN` で、別のサイトの枠に入れて押させることもできない

@@ -408,5 +408,63 @@ class ReportsTest(unittest.TestCase):
         plain.store(page).ack()
 
 
+class TailnetTest(unittest.TestCase):
+    """serve --tailscale: requests that Tailscale serve proxies by the tailnet name, for this PC's own user only."""
+    ORIGIN = 'https://pc.tail1234.ts.net'
+
+    @classmethod
+    def setUpClass(cls):
+        cls.root = tempfile.mkdtemp()
+        write(cls.root, 'r/index.html', '<title>r</title><body>x</body>')
+        cls.talk = tp.Talk(cls.root, 0, name='x.localhost', reports=True, remote=(cls.ORIGIN, 'Alice'))
+
+        class H(tp.Handler):
+            talk = cls.talk
+        cls.srv = tp.Server(('127.0.0.1', 0), H)
+        cls.port = cls.talk.port = cls.srv.server_address[1]
+        threading.Thread(target=cls.srv.serve_forever, kwargs={'poll_interval': 0.05}, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+        cls.srv.server_close()
+        shutil.rmtree(cls.root)
+
+    req = HttpTest.req
+
+    def test_own_user_only(self):
+        via = {'Host': 'pc.tail1234.ts.net', 'Origin': self.ORIGIN, 'Tailscale-User-Login': 'alice'}
+        user = {'page': 'r/index.html', 'id': 'C1', 'title': 'x', 'comment': 'from the phone', 'notify': False}
+        self.assertEqual(self.req('/_talk/api/user', user, via)[0], 200)
+        self.assertEqual(self.req('/r/', headers=dict(via, Origin=None))[0], 200)
+        self.assertEqual(self.req('/r/', headers=dict(via, Origin=None, **{
+            'Tailscale-User-Login': '=?utf-8?q?Alice?='}))[0], 200)                  # serve's encoded form
+        for bad in ({'Tailscale-User-Login': None}, {'Tailscale-User-Login': 'bob'},
+                    {'Tailscale-Funnel-Request': '?1'}, {'Host': 'other.tail1234.ts.net'},
+                    {'Origin': 'https://evil.example'}, {'Origin': 'http://pc.tail1234.ts.net'}):
+            self.assertEqual(self.req('/_talk/api/info', headers=dict(via, **bad))[0], 403, bad)
+        info = self.req('/_talk/api/info')[1]                       # this PC as before
+        self.assertEqual((info['url'], info['local_url']),
+                         (self.ORIGIN + '/', 'http://x.localhost:%d/' % self.port))
+        self.assertEqual(self.req('/_talk/api/reports')[1]['url'], self.ORIGIN + '/')
+        self.req('/_talk/api/ack', {'page': 'r/index.html'})
+
+    def test_serve_origin(self):
+        p = self.port
+        serve = {'TCP': {'443': {'HTTPS': True}, '8443': {'HTTPS': True}, '80': {'HTTP': True}},
+                 'Web': {'pc.tail1234.ts.net:8443': {'Handlers': {'/': {'Proxy': 'http://127.0.0.1:1'}}},
+                         'pc.tail1234.ts.net:443': {'Handlers': {'/': {'Proxy': 'http://127.0.0.1:%d' % p}}}}}
+        self.assertEqual(tp.serve_origin(serve, p), self.ORIGIN)
+        self.assertEqual(tp.serve_origin(serve, 1), self.ORIGIN + ':8443')
+        self.assertIsNone(tp.serve_origin(serve, 2))
+        self.assertIsNone(tp.serve_origin(None, p))
+        moved = {'TCP': {'443': {'HTTPS': True}},
+                 'Web': {'pc.tail1234.ts.net:443': {'Handlers': {'/notes': {'Proxy': 'http://127.0.0.1:%d' % p}}}}}
+        self.assertIsNone(tp.serve_origin(moved, p))                # not at /: the pages' absolute paths break
+        plain = {'TCP': {'80': {'HTTP': True}},
+                 'Web': {'pc.tail1234.ts.net:80': {'Handlers': {'/': {'Proxy': 'http://localhost:%d/' % p}}}}}
+        self.assertEqual(tp.serve_origin(plain, p), 'http://pc.tail1234.ts.net')
+
+
 if __name__ == '__main__':
     unittest.main()

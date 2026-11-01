@@ -9,7 +9,7 @@ the page with a status (OK / NG …) or writes a comment, the waiting agent wake
   buttons, a comment thread and a sign whether the agent is waiting
 - Statuses and threads are saved beside the page in `<page name>.talk.json` (not in the browser; only an unsent
   comment is kept in that browser's localStorage)
-- The server listens on `127.0.0.1` only and sends nothing out. Python 3.9+ standard library only. Pages use no CDN
+- The server listens on `127.0.0.1` only and sends nothing out (a phone reaches it through Tailscale; "From outside"). Python 3.9+ standard library only. Pages use no CDN
 - The agent waits by running `talkpage wait` in the background. When the user writes, it prints what they did and
   exits, and the exit wakes the agent (Claude Code: Bash with `run_in_background`)
 
@@ -32,7 +32,7 @@ Python 3.9 or later is needed.
 ## Start
 
 ```
-talkpage serve <root> [--port 8190] [--open <page>] [--name <name>.localhost] [--reports]
+talkpage serve <root> [--port 8190] [--open <page>] [--name <name>.localhost] [--reports] [--tailscale]
 ```
 
 - `<root>`: the folder that holds the pages (e.g. a notes folder of your workspace). An HTML file under it opens at
@@ -51,6 +51,34 @@ talkpage serve <root> [--port 8190] [--open <page>] [--name <name>.localhost] [-
   no hosts entry is needed. When port 80 is taken it says so in one line and the pages are at
   `http://<name>.localhost:<port>/`. The agent's commands keep using `127.0.0.1:<port>`. Other names are refused
 - `--reports`: the root holds reports (see "Reports" below)
+- `--tailscale`: open the pages from a phone or another PC through a [Tailscale](https://tailscale.com/kb/1312/serve)
+  tailnet (a private network of your own devices) (see "From outside" below)
+
+## From outside (`--tailscale`)
+
+Leave the PC on and read the same pages, and comment on them, from a phone or a PC elsewhere. Nothing goes on the
+internet.
+
+1. Install Tailscale on the PC and the phone and sign in with the same account
+2. On the PC, have the `/` of its tailnet name proxied to talkpage (this stays after a restart). The first time it
+   gives a link to turn on HTTPS certificates; open it and turn them on (a certificate puts the PC's tailnet name
+   `<PC>.<tailnet>.ts.net` in the public certificate logs)
+
+   ```
+   tailscale serve --bg --https=443 http://127.0.0.1:8190
+   ```
+
+3. Start with `talkpage serve <root> --tailscale ...`. The address the user reads (`url` of `info`) becomes
+   `https://<PC>.<tailnet>.ts.net/`, which the PC's browser and the phone both open; this PC's own address is
+   `local_url`
+
+- At the start it reads `tailscale status --json` and `tailscale serve status --json` to check that `/` goes to
+  `127.0.0.1:<port>` and to learn the login of this PC's user. If nothing goes there it says so in one line and serves
+  this PC only, as before (start it again after setting serve)
+- A request by the tailnet name passes only when the `Tailscale-User-Login` that Tailscale serve adds is this PC's user
+  (serve drops that header from what a device sends and sets it itself). A shared device of someone else, a tagged
+  device (no login) and Funnel (the internet; `Tailscale-Funnel-Request`) get 403
+- To stop: `tailscale serve --https=443 off`
 
 ## Making a page
 
@@ -182,8 +210,9 @@ an `index.html` at the root, `/` is the list of reports.
 
 **On the page**
 
-- Selecting text shows a "Comment" button; it opens a card in the right margin, and the item (`C1`, `C2`, …, titled
-  with the selected text) is made by the first send. Leaving without sending (a click elsewhere, Esc) drops it
+- Selecting text shows a "Comment" button (on a phone: select by a long press, and it shows below the selection once
+  the finger rests); it opens a card in the right margin, and the item (`C1`, `C2`, …, titled with the selected text)
+  is made by the first send. Leaving without sending (a click elsewhere, Esc) drops it
 - The commented text gets a yellow highlight (darker for the open card; CSS Custom Highlight API); clicking it opens
   the card. Comments whose text is no longer in the page are listed at the end
 - A closed card shows the agent's summary (`reply --summary`, up to 3 lines) or the first line of the last message.
@@ -251,7 +280,7 @@ send `Origin: http://127.0.0.1:<port>` (see "Safety").
 
 | | |
 |---|---|
-| `GET /_talk/api/info` | root, port, the agent's state (`listening` / `working` / `absent`), pages with a state, `name`, `url` (where the user reads), `open` (pages that asked `state` with `open=1` in the last 90 s, i.e. open in a browser tab) |
+| `GET /_talk/api/info` | root, port, the agent's state (`listening` / `working` / `absent`), pages with a state, `name`, `url` (where the user reads; the tailnet address with `--tailscale`), `local_url` (this PC's own address), `open` (pages that asked `state` with `open=1` in the last 90 s, i.e. open in a browser tab) |
 | `GET /_talk/api/state?page=P` | All items of a page. With `&rev=N&wait=25` (and `&presence=…`) it waits up to that many seconds for the revision (or the agent's state) to change. `&open=1` counts the page as open |
 | `GET /_talk/api/reports` | Under `--reports` only: `{root, url, rows: [{page, theme, round, title, owner, tracked, status, read, comments, time}]}`, newest first |
 | `GET /_talk/api/pending[?page=P]` | Items unread by the agent and each one's new user actions (`new`). `wait` uses `&wait=50&listen=1` (shows "listening" meanwhile; what it printed is not printed again) and `&take=1` |
@@ -267,12 +296,14 @@ seen take the exact path only.
 
 ## Safety
 
-- Listens on `127.0.0.1` only. No CORS headers (another site's `fetch` cannot read a response; the preflight
-  `OPTIONS` gets 501)
+- Listens on `127.0.0.1` only (also with `--tailscale`: Tailscale serve relays the requests from outside). No CORS
+  headers (another site's `fetch` cannot read a response; the preflight `OPTIONS` gets 501)
 - 403 (`Handler._local`) for:
   - a `Host` other than `127.0.0.1:<port>` / `localhost:<port>` (and `<name>:<port>` of `--name`; without `:80` on the
-    port 80 listener) (DNS rebinding)
-  - an `Origin` other than `http://127.0.0.1:<port>` / `http://localhost:<port>` (another site's page; `null` too)
+    port 80 listener; the tailnet name with `--tailscale`) (DNS rebinding)
+  - a request by the tailnet name whose `Tailscale-User-Login` is not this PC's user, or with
+    `Tailscale-Funnel-Request` ("From outside")
+  - an `Origin` other than `http://` of those hosts (`https://` for the tailnet) (another site's page; `null` too)
   - a request the browser marks `Sec-Fetch-Site: cross-site` / `same-site`. From another site only opening a page by
     a link (a top-level navigation) passes; `<img>`, `<script>`, iframes and `fetch` do not
   - a request that changes something (POST, DELETE, and `pending?listen=1` / `take=1` by which `wait` takes items)
