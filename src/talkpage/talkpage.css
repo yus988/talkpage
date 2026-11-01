@@ -171,6 +171,9 @@ body { padding-bottom: 64px; }
 }
 .talk-sbbar button:hover { border-color: var(--talk-line); }
 .talk-sb-tog { font-size: 15px !important; }
+.talk-sb-home { padding: 0 7px; color: var(--talk-accent); text-decoration: none; white-space: nowrap; border-radius: 12px; }
+.talk-sb-home:hover { background: var(--talk-user-bg); }
+.talk-sb-home[hidden] { display: none; }
 .talk-sb-zoom { min-width: 3.6em; }
 .talk-sb {
   position: fixed; left: 0; top: 0; bottom: 0; z-index: 990; box-sizing: border-box; display: flex; flex-direction: column;
@@ -223,8 +226,9 @@ body { padding-bottom: 64px; }
   body table { display: block; max-width: 100%; overflow-x: auto; }
   textarea, input, select { font-size: 16px !important; }   /* below 16px iOS zooms in on a tap and stays there */
   .talk-sbbar {
-    left: 10px; top: auto; bottom: 10px; width: 46px; height: 46px; padding: 0; justify-content: center; border-radius: 50%;
+    left: 10px; top: auto; bottom: 10px; min-width: 46px; height: 46px; padding: 0; justify-content: center; border-radius: 23px;
   }
+  .talk-sbbar .talk-sb-home { padding: 0 16px 0 4px; font-size: 15px; line-height: 46px; }
   .talk-sbbar .talk-sb-zbtn, .talk-sbbar .talk-sb-zoom, .talk-sbbar .talk-sb-fit { display: none; }
   .talk-sbbar .talk-sb-tog { width: 46px; height: 46px; padding: 0; font-size: 20px !important; border: 0; }
   .talk-sb { width: min(86vw, 340px) !important; padding: 8px 0 66px; font-size: 14px; }

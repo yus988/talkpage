@@ -90,19 +90,24 @@ REPORTS = {
            'all': 'All', 'only_unread': 'Unread', 'starred': '★ Later', 'by_place': 'By place', 'by_time': 'Newest',
            'places': '%d folders · all pages with a state: <a href="/_talk/">/_talk/</a>',
            'mark_read': 'Mark read', 'mark_unread': 'Unread', 'star': 'Look again later', 'tags': 'Tags',
-           'tag_prompt': 'Tags, separated by commas (empty removes them)', 'count': '%d', 'failed': 'Not saved'},
+           'tag_prompt': 'Tags, separated by commas (empty removes them)', 'count': '%d', 'failed': 'Not saved',
+           'archived': 'Hidden', 'hide': 'Hide', 'unhide': 'Show', 'hide_title': 'Hide from the list (the page stays)',
+           'unhide_title': 'Back to the list'},
     'ja': {'title': 'レポートの一覧', 'unread': '未読', 'comments': 'コメント %s', 'none': '（まだ無い）',
            'no_owner': '担当なし', 'meta': 'root: %s ・ 状態のあるページの一覧: <a href="/_talk/">/_talk/</a>',
            'all': 'すべて', 'only_unread': '未読', 'starred': '★ あとで', 'by_place': '場所ごと', 'by_time': '新しい順',
            'places': 'フォルダ %d か所 ・ 状態のあるページの一覧: <a href="/_talk/">/_talk/</a>',
            'mark_read': '既読に', 'mark_unread': '未読に', 'star': 'あとでもう一度見る', 'tags': 'タグ',
-           'tag_prompt': 'タグ（カンマか読点で区切る。空にすると外す）', 'count': '%d 件', 'failed': '保存できませんでした'},
+           'tag_prompt': 'タグ（カンマか読点で区切る。空にすると外す）', 'count': '%d 件', 'failed': '保存できませんでした',
+           'archived': '非表示', 'hide': '非表示', 'unhide': '再表示', 'hide_title': '一覧から隠す（ページは残る）',
+           'unhide_title': '一覧に戻す'},
 }
 FAVICON = ("<link rel=\"icon\" href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>"
            "<text y='.9em' font-size='90'>💬</text></svg>\">")
 # the list of reports (report_listing): the rows come in as JSON and the script draws them (textContent only). By place
 # (a heading per group, folded by a tap) or newest first; all / unread / starred / a tag; a star, the tags and "read"
-# are set by the buttons of a row. The view, the filter and the folds stay in localStorage
+# are set by the buttons of a row; "hide" takes a row out of the list (and the sidebars) until it is shown again from
+# the filter "hidden". The view, the filter and the folds stay in localStorage
 LISTING_PAGE = r'''<!doctype html><html lang="{{LANG}}"><head><meta charset="utf-8">{{VIEWPORT}}<title>{{TITLE}}</title>
 {{FAVICON}}<style>
 :root{color-scheme:light dark;--line:#8884;--dim:#777;--link:#0a5fb4;--red:#cf222e;--amber:#b45309;--chip:#8881}
@@ -122,7 +127,7 @@ li a:hover .t{text-decoration:underline}.t{font-weight:600;color:var(--link)}
 .tag{font-size:12px;background:var(--chip);border-radius:4px;padding:0 6px}
 .acts{position:relative;flex:none;display:flex;gap:4px;padding-top:6px}
 .act{min-width:36px;height:32px;border:1px solid var(--line);background:none;border-radius:6px;padding:0 6px;font-size:14px}
-.act.read{min-width:64px}.act.star.on{color:#d4a017}.act:disabled{opacity:.5}
+.act.read{min-width:64px}.act.hide{min-width:56px}.act.star.on{color:#d4a017}.act:disabled{opacity:.5}
 .flash{position:absolute;right:0;top:40px;z-index:2;white-space:nowrap;font-size:12px;background:var(--red);color:#fff;
   border-radius:4px;padding:2px 6px}
 .group{margin:0 0 16px}.ghead{display:flex;gap:10px;align-items:baseline;width:100%;text-align:left;border:none;
@@ -130,6 +135,8 @@ li a:hover .t{text-decoration:underline}.t{font-weight:600;color:var(--link)}
 .ghead::before{content:"▾";width:1em}.ghead[aria-expanded=false]::before{content:"▸"}
 .ghead .n{font-weight:400;font-size:13px;color:var(--dim)}.ghead .u{margin-left:0}
 .none{color:var(--dim)}
+@media (max-width:599px){li{flex-wrap:wrap;gap:0}li a{flex-basis:100%;padding-bottom:4px}
+  .acts{flex:1;justify-content:flex-end;padding:0 0 8px}.flash{top:auto;bottom:44px}}
 </style></head>
 <body data-talk-listing><main><h1>{{TITLE}}</h1><p class="meta">{{META}}</p><div id="talk-bar"></div>
 <div id="talk-list"></div></main>
@@ -159,10 +166,13 @@ li a:hover .t{text-decoration:underline}.t{font-weight:600;color:var(--link)}
   function theme(r) { return r.place && r.theme.indexOf(r.place + '/') === 0 ? r.theme.slice(r.place.length + 1) : r.theme; }
   function tagsOf() {
     var n = {};
-    D.rows.forEach(function (r) { r.tags.forEach(function (t) { n[t] = (n[t] || 0) + 1; }); });
+    D.rows.filter(shown).forEach(function (r) { r.tags.forEach(function (t) { n[t] = (n[t] || 0) + 1; }); });
     return n;
   }
+  function shown(r) { return !r.hidden; }
   function match(r) {
+    if (S.filter === 'hidden') return r.hidden;
+    if (r.hidden) return false;
     if (S.filter === 'unread') return unread(r);
     if (S.filter === 'star') return r.star;
     if (S.filter.indexOf('tag:') === 0) return r.tags.indexOf(S.filter.slice(4)) >= 0;
@@ -177,14 +187,17 @@ li a:hover .t{text-decoration:underline}.t{font-weight:600;color:var(--link)}
   }
   function drawBar(tags) {
     bar.textContent = '';
-    var f = el('div', 'grp');
-    [['all', M.all, D.rows.length], ['unread', M.only_unread, D.rows.filter(unread).length],
-     ['star', M.starred, D.rows.filter(function (r) { return r.star; }).length]].forEach(function (x) {
+    var f = el('div', 'grp'), rows = D.rows.filter(shown), hidden = D.rows.length - rows.length;
+    [['all', M.all, rows.length], ['unread', M.only_unread, rows.filter(unread).length],
+     ['star', M.starred, rows.filter(function (r) { return r.star; }).length]].forEach(function (x) {
       f.appendChild(chip(x[1], S.filter === x[0], x[2], function () { S.filter = x[0]; save(); draw(); }));
     });
     Object.keys(tags).sort().forEach(function (t) {
       f.appendChild(chip('#' + t, S.filter === 'tag:' + t, tags[t], function () { S.filter = 'tag:' + t; save(); draw(); }));
     });
+    if (hidden || S.filter === 'hidden') {
+      f.appendChild(chip(M.archived, S.filter === 'hidden', hidden, function () { S.filter = 'hidden'; save(); draw(); }));
+    }
     bar.appendChild(f);
     if (!D.multi) return;
     var g = el('div', 'grp');
@@ -249,12 +262,19 @@ li a:hover .t{text-decoration:underline}.t{font-weight:600;color:var(--link)}
       });
       acts.appendChild(rd);
     }
+    var hd = el('button', 'act hide', r.hidden ? M.unhide : M.hide);
+    hd.title = r.hidden ? M.unhide_title : M.hide_title;
+    hd.addEventListener('click', function () {
+      send('mark', { page: r.page, hidden: !r.hidden }, hd, function (d) { r.hidden = d.hidden; });
+    });
+    acts.appendChild(hd);
     li.appendChild(acts);
     return li;
   }
   function draw() {
     var tags = tagsOf();
-    if (S.filter.indexOf('tag:') === 0 && !tags[S.filter.slice(4)]) S.filter = 'all';
+    if (S.filter.indexOf('tag:') === 0 && !tags[S.filter.slice(4)] ||
+        S.filter === 'hidden' && !D.rows.some(function (r) { return r.hidden; })) S.filter = 'all';
     drawBar(tags);
     list.textContent = '';
     var rows = D.rows.filter(match), ul;
@@ -706,7 +726,7 @@ class Talk:
         return out
 
     def marks(self):
-        """{page: {star, tags}} set in the list of reports (the file of --marks), or {}."""
+        """{page: {star, tags, hidden}} set in the list of reports (the file of --marks), or {}."""
         try:
             with open(self.marks_path, encoding='utf-8') as f:
                 d = json.load(f)
@@ -715,11 +735,13 @@ class Talk:
         pages = d.get('pages') if isinstance(d, dict) else None
         return {k: v for k, v in pages.items() if isinstance(v, dict)} if isinstance(pages, dict) else {}
 
-    def mark(self, page, star=None, tags=None):
-        """Star a report or set its tags (None keeps them). Callers hold self.cond."""
+    def mark(self, page, star=None, tags=None, hidden=None):
+        """Star a report, set its tags or hide it from the list (None keeps them). Callers hold self.cond."""
         p, _ = self.page_file(page)
         if star is not None and not isinstance(star, bool):
             raise ValueError('star: true or false')
+        if hidden is not None and not isinstance(hidden, bool):
+            raise ValueError('hidden: true or false')
         if tags is not None:
             if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
                 raise ValueError('tags: a list of strings')
@@ -732,6 +754,8 @@ class Talk:
             m['star'] = star
         if tags is not None:
             m['tags'] = tags
+        if hidden is not None:
+            m['hidden'] = hidden
         m = {k: v for k, v in m.items() if v}
         if m:
             marks[p] = m
@@ -743,7 +767,7 @@ class Talk:
             json.dump({'pages': marks}, f, ensure_ascii=False, indent=1, sort_keys=True)
             f.write('\n')
         os.replace(tmp, self.marks_path)
-        return {'page': p, 'star': bool(m.get('star')), 'tags': m.get('tags') or []}
+        return {'page': p, 'star': bool(m.get('star')), 'tags': m.get('tags') or [], 'hidden': bool(m.get('hidden'))}
 
     def walk_reports(self):
         """(theme, round, page, file, time, title, lang, place) of each report: the last round of each theme with
@@ -804,7 +828,8 @@ class Talk:
                              'owner': owner if isinstance(owner, str) else '', 'tracked': bool(r),
                              'status': read if r else '-', 'read': bool(r) and read in READ,
                              'comments': comments, 'time': t, 'lang': lang, 'place': pl.id, 'group': pl.group,
-                             'star': mk.get('star') is True, 'tags': [x for x in tags if isinstance(x, str)]})
+                             'star': mk.get('star') is True, 'tags': [x for x in tags if isinstance(x, str)],
+                             'hidden': mk.get('hidden') is True})
         rows.sort(key=lambda x: x['time'], reverse=True)
         return {'root': self.root and self.root.replace('\\', '/'), 'url': self.url, 'rows': rows,
                 'places': self.place_list()}
@@ -980,10 +1005,10 @@ class Talk:
         if path != '/_talk/api/ack' and not body.get('page'):
             raise ValueError('page is required')
         with self.cond:
-            if path == '/_talk/api/mark':          # the list of reports: a star, the tags
+            if path == '/_talk/api/mark':          # the list of reports: a star, the tags, hidden
                 if not self.report_mode:
                     return 404, dump({'error': 'the server runs without --reports'})
-                return 200, dump(self.mark(body.get('page'), body.get('star'), body.get('tags')))
+                return 200, dump(self.mark(body.get('page'), body.get('star'), body.get('tags'), body.get('hidden')))
             if path == '/_talk/api/user':
                 s = self.store(body.get('page'))
                 it = s.user(body.get('id'), body.get('title'), body.get('status'), body.get('comment'),

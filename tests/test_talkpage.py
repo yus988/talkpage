@@ -498,12 +498,16 @@ class PlacesTest(unittest.TestCase):
 
     def test_marks_and_read(self):
         r = self.req('/_talk/api/mark', {'page': self.R5, 'star': True, 'tags': [' 展示 ', '展示', 'later']})
-        self.assertEqual(r, (200, {'page': self.R5, 'star': True, 'tags': ['展示', 'later']}))
+        self.assertEqual(r, (200, {'page': self.R5, 'star': True, 'tags': ['展示', 'later'], 'hidden': False}))
         self.assertEqual((self.rows()[self.R5]['star'], self.rows()[self.R5]['tags']), (True, ['展示', 'later']))
-        self.req('/_talk/api/mark', {'page': self.R5, 'star': False, 'tags': []})
+        r = self.req('/_talk/api/mark', {'page': self.R5, 'hidden': True})             # hidden; the star and tags kept
+        self.assertEqual(r[1], {'page': self.R5, 'star': True, 'tags': ['展示', 'later'], 'hidden': True})
+        self.assertTrue(self.rows()[self.R5]['hidden'])
+        self.assertFalse(self.rows()[self.R3]['hidden'])
+        self.req('/_talk/api/mark', {'page': self.R5, 'star': False, 'tags': [], 'hidden': False})
         with open(self.marks, encoding='utf-8') as f:
             self.assertEqual(json.load(f), {'pages': {}})                 # nothing left: the entry goes
-        for bad in ({'page': self.R5, 'tags': ['a,b']}, {'page': self.R5, 'star': 'yes'},
+        for bad in ({'page': self.R5, 'tags': ['a,b']}, {'page': self.R5, 'star': 'yes'}, {'page': self.R5, 'hidden': 1},
                     {'page': 'secret.html', 'star': True}, {'page': self.R5, 'tags': [str(i) for i in range(9)]}):
             self.assertEqual(self.req('/_talk/api/mark', bad)[0], 400, bad)
         self.req('/_talk/api/user', {'page': self.R3, 'id': 'read', 'status': '読んだ', 'notify': False})

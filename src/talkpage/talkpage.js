@@ -64,6 +64,8 @@
       'sb.grip': 'Drag to change the width',
       'sb.reports': 'Reports',
       'sb.all': 'All reports (stars, tags)',
+      'sb.home': '← List',
+      'sb.home.title': 'The list of reports',
       'sb.page': 'This page',
       'sb.noowner': 'No owner',
       'sb.unread': 'unread {n}',
@@ -121,6 +123,8 @@
       'sb.grip': 'ドラッグで幅の変更',
       'sb.reports': 'レポート',
       'sb.all': 'レポートの一覧（スター・タグ）',
+      'sb.home': '← 一覧',
+      'sb.home.title': 'レポートの一覧',
       'sb.page': 'このページ',
       'sb.noowner': '担当なし',
       'sb.unread': '未読 {n}',
@@ -1117,7 +1121,7 @@
   var PREFS = 'talk-sidebar';
   var sb = { open: true, width: 280, fold: {}, zoom: 1 };
   var sbEl = null, sbTog = null, sbBack = null, zoomLabel = null, rp = null, tp = null, tocLinks = [], tocQueued = false;
-  var unzoomBtn = null;
+  var unzoomBtn = null, homeLink = null;
 
   // the layout's width (window.innerWidth follows pinch zoom on iOS). Under 900 the sidebar lies over the report;
   // under 700 (a phone) the browser's own pinch zoom replaces the report's zoom
@@ -1214,6 +1218,13 @@
     zoomLabel.title = tr('sb.zoomreset');
     fit.title = tr('sb.fit.title');
     [sbTog, minus, zoomLabel, plus, fit].forEach(function (x) { bar.appendChild(x); });
+    if (!LISTING) {                                        // back to the list of reports, once the server says it has one
+      homeLink = el('a', 'talk-sb-home', tr('sb.home'));
+      homeLink.href = '/';
+      homeLink.title = tr('sb.home.title');
+      homeLink.hidden = true;
+      bar.insertBefore(homeLink, sbTog.nextSibling);
+    }
     sbEl = el('nav', 'talk-ui talk-sb');
     sbEl.style.width = sb.width + 'px';
     rp = pane('reports', tr('sb.reports'));
@@ -1370,8 +1381,9 @@
   function isUnread(r) { return r.tracked && !r.read; }
 
   // the reports by place (a server of several folders) or by owner; unread ones bold, ones added since this page opened
-  // marked new, this page marked
+  // marked new, this page marked; the ones hidden in the list left out (but this page)
   function renderReports(rows) {
+    rows = rows.filter(function (r) { return !r.hidden || r.page === page; });
     if (!reportsFirst) {
       reportsFirst = {};
       rows.forEach(function (r) { reportsFirst[r.page] = true; });
@@ -1429,6 +1441,7 @@
       .then(function (d) {
         if (!d) return;
         var rows = Array.isArray(d.rows) ? d.rows : [];
+        if (homeLink) homeLink.hidden = false;
         if (rp) renderReports(rows);
         readBox(rows);
       })

@@ -173,8 +173,9 @@ talkpage serve --reports --place "sdk-workspace:notes=C:/ws-a/dev-notes" --place
 - ☆ / ★: あとでもう一度見るものの印
 - `#`: タグを付ける（カンマか読点で区切って入力。空にすると外す。1 つ 24 字まで、8 つまで）
 - 既読に / 未読に: 回のあるテーマの「読んだ」を付け外す（ページの末尾の欄と同じ。エージェントは起こさない）
+- 非表示: 一覧と各レポートのサイドバーから隠す（ページはそのまま）。隠したものは上の欄の「非表示」に集まり、「再表示」で戻る。回のあるテーマで新しい回ができると、その回は別の行として出る
 
-スターとタグは、レポートの横ではなく 1 つのファイル（`--marks`。既定 `~/.talkpage/marks-<port>.json`）に置く（git に入れない、自分だけの印）。表示の切り替え・絞り込み・畳み方はこのブラウザに残る。各レポートのサイドバーの上には一覧へのリンクが出て、★ の付いたものに印が付く。`--place` のときは、サイドバーも見出しごとにまとめる。
+スター・タグ・非表示は、レポートの横ではなく 1 つのファイル（`--marks`。既定 `~/.talkpage/marks-<port>.json`）に置く（git に入れない、自分だけの印）。表示の切り替え・絞り込み・畳み方はこのブラウザに残る。各レポートの左上（スマホでは左下の丸いボタンの横）の「← 一覧」と、サイドバーの上のリンクで一覧に戻る。サイドバーでは★ の付いたものに印が付く。`--place` のときは、サイドバーも見出しごとにまとめる。
 
 **画面**
 
@@ -236,8 +237,8 @@ talkpage serve --reports --place "sdk-workspace:notes=C:/ws-a/dev-notes" --place
 |---|---|
 | `GET /_talk/api/info` | root（`--place` なら `places: [{id, group, root}]`）、ポート、エージェントの状態（`listening` / `working` / `absent`）、状態のあるページ、`name`・`url`（ユーザーが読むアドレス。`--tailscale` なら tailnet のアドレス）・`local_url`（この PC だけのアドレス）、`open`（90 秒以内に `state` を `open=1` 付きで聞いたページ = ブラウザのタブで開いているページ） |
 | `GET /_talk/api/state?page=P` | ページの全項目。`&rev=N&wait=25`（と `&presence=…`）を付けると、版（とエージェントの状態）が変わるまで最大その秒数待つ。`&open=1` でそのページを「開いている」とする |
-| `GET /_talk/api/reports` | `--reports` のときだけ。レポートの一覧 `{root, url, places, rows: [{page, theme, round, title, owner, tracked, status, read, comments, time, lang, place, group, star, tags}]}`（新しい順） |
-| `POST /_talk/api/mark` `{page, star?, tags?}` | `--reports` のときだけ。一覧のスター（`true` / `false`）とタグ（文字列の配列。`[]` で外す）。省いた方はそのまま |
+| `GET /_talk/api/reports` | `--reports` のときだけ。レポートの一覧 `{root, url, places, rows: [{page, theme, round, title, owner, tracked, status, read, comments, time, lang, place, group, star, tags, hidden}]}`（新しい順） |
+| `POST /_talk/api/mark` `{page, star?, tags?, hidden?}` | `--reports` のときだけ。一覧のスター（`true` / `false`）、タグ（文字列の配列。`[]` で外す）、非表示（`true` / `false`）。省いたものはそのまま |
 | `GET /_talk/api/pending[?page=P]` | エージェント未読の項目と、各項目の新しいユーザーの操作（`new`）。`wait` の内部で `&wait=50&listen=1`（待っている間は「受付中」、出したものは再び出さない）と `&take=1` を使う |
 | `POST /_talk/api/user` `{page, id, title?, status?, comment?, notify?}` | ユーザーの操作（ページが送る）。`status: ""` で解除、`notify: false` でエージェントを起こさない |
 | `POST /_talk/api/seen` `{page, id}` | ユーザーがエージェントのメッセージを読んだ |

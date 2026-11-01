@@ -236,10 +236,13 @@ switch shows under `--place` only). The bar filters by "All", "Unread", "★ Lat
 - `#`: tags (type them separated by commas; empty removes them; up to 8, each up to 24 characters)
 - Mark read / Unread: "Read" of a theme with rounds (the same as the item at the end of its page; does not wake the
   agent)
+- Hide: takes the row out of the list and of the reports' sidebars (the page stays). Hidden rows gather under the filter
+  "Hidden" and come back with "Show". A new round of a theme comes as a row of its own
 
-Stars and tags are kept in one file (`--marks`, default `~/.talkpage/marks-<port>.json`), not beside the reports: your
-own marks, kept out of git. The view, the filter and the folds stay in this browser. Each report's sidebar starts with
-a link to the list and marks starred rows with ★; under `--place` it groups the reports by heading too.
+Stars, tags and hidden rows are kept in one file (`--marks`, default `~/.talkpage/marks-<port>.json`), not beside the reports: your
+own marks, kept out of git. The view, the filter and the folds stay in this browser. "← List" at the top left of each report
+(on a phone, beside the round button at the bottom left) and a link at the top of its sidebar go back to the list; the
+sidebar marks starred rows with ★; under `--place` it groups the reports by heading too.
 
 **On the page**
 
@@ -321,8 +324,8 @@ send `Origin: http://127.0.0.1:<port>` (see "Safety").
 |---|---|
 | `GET /_talk/api/info` | root (under `--place`: `places: [{id, group, root}]`), port, the agent's state (`listening` / `working` / `absent`), pages with a state, `name`, `url` (where the user reads; the tailnet address with `--tailscale`), `local_url` (this PC's own address), `open` (pages that asked `state` with `open=1` in the last 90 s, i.e. open in a browser tab) |
 | `GET /_talk/api/state?page=P` | All items of a page. With `&rev=N&wait=25` (and `&presence=…`) it waits up to that many seconds for the revision (or the agent's state) to change. `&open=1` counts the page as open |
-| `GET /_talk/api/reports` | Under `--reports` only: `{root, url, places, rows: [{page, theme, round, title, owner, tracked, status, read, comments, time, lang, place, group, star, tags}]}`, newest first |
-| `POST /_talk/api/mark` `{page, star?, tags?}` | Under `--reports` only: the star (`true` / `false`) and the tags (a list of strings; `[]` removes them) of the list; what is left out stays |
+| `GET /_talk/api/reports` | Under `--reports` only: `{root, url, places, rows: [{page, theme, round, title, owner, tracked, status, read, comments, time, lang, place, group, star, tags, hidden}]}`, newest first |
+| `POST /_talk/api/mark` `{page, star?, tags?, hidden?}` | Under `--reports` only: the star (`true` / `false`), the tags (a list of strings; `[]` removes them) and hidden (`true` / `false`) of the list; what is left out stays |
 | `GET /_talk/api/pending[?page=P]` | Items unread by the agent and each one's new user actions (`new`). `wait` uses `&wait=50&listen=1` (shows "listening" meanwhile; what it printed is not printed again) and `&take=1` |
 | `POST /_talk/api/user` `{page, id, title?, status?, comment?, notify?}` | A user action (sent by the page). `status: ""` clears; `notify: false` does not wake the agent |
 | `POST /_talk/api/seen` `{page, id}` | The user read the agent's message |
