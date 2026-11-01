@@ -63,6 +63,11 @@ READ = ('読んだ', 'Read')                                       # the statuse
 OPEN_SECONDS = 90                                               # a page asked with open=1 this recently is open
 # added to the report pages the server hands out (--reports); fixed, nothing of the page or the user goes in
 INJECT = b'<link rel="stylesheet" href="/_talk/talkpage.css"><script src="/_talk/talkpage.js" defer data-talk-report></script>'
+VIEWPORT = b'<meta name="viewport" content="width=device-width, initial-scale=1">'
+VIEWPORT_RE = re.compile(rb'<meta\b[^>]*\bname\s*=\s*["\']?viewport\b', re.I)
+HEAD_RE = re.compile(rb'<head\b[^>]*>', re.I)
+HTML_RE = re.compile(rb'<html\b[^>]*>', re.I)
+DOCTYPE_RE = re.compile(rb'<!doctype\b[^>]*>', re.I)
 # the index page (/_talk/)
 LISTING = {
     'en': {'unread': ' — unread by the agent: %d', 'meta': 'root: %s · agent: %s', 'none': '(none yet)',
@@ -190,7 +195,13 @@ def report_key(page):
 
 
 def inject(data):
-    """The client added before the last </body> (else at the end) of a page that does not load talkpage.js itself."""
+    """A phone-width viewport for a page without one (after <head>, else <html>, else the doctype, else at the start;
+    without it a phone lays the page out wider than the screen), and the client before the last </body> (else at the
+    end) of a page that does not load talkpage.js itself."""
+    if not VIEWPORT_RE.search(data):
+        m = HEAD_RE.search(data) or HTML_RE.search(data) or DOCTYPE_RE.search(data)
+        i = m.end() if m else 0
+        data = data[:i] + VIEWPORT + data[i:]
     if b'/_talk/talkpage.js' in data:
         return data
     i = data.lower().rfind(b'</body>')
@@ -654,12 +665,13 @@ class Talk:
                 name = '<a href="%s">%s</a>' % (href, html.escape(p)) if href else html.escape(p)
                 rows.append('<li>%s%s</li>' % (name, m['unread'] % n if n else ''))
             root = html.escape(self.root or '-')
-        return ('<!doctype html><html lang="%s"><head><meta charset="utf-8"><title>talkpage</title>%s'
-                '<style>body{font:15px/1.7 system-ui,sans-serif;margin:24px 16px;max-width:860px}'
-                '.m{color:#666;font-size:13px}</style></head><body><h1>talkpage</h1>'
+        return ('<!doctype html><html lang="%s"><head><meta charset="utf-8">%s<title>talkpage</title>%s'
+                '<style>:root{color-scheme:light dark}'
+                'body{font:15px/1.7 system-ui,sans-serif;margin:24px 16px;max-width:860px;overflow-wrap:break-word}'
+                '.m{color:#888;font-size:13px}</style></head><body><h1>talkpage</h1>'
                 '<p class="m">%s</p><ul>%s</ul><p class="m">%s</p></body></html>'
-                % (self.lang, FAVICON, m['meta'] % (root, self.presence()), ''.join(rows) or '<li>%s</li>' % m['none'],
-                   m['note'])).encode('utf-8')
+                % (self.lang, VIEWPORT.decode(), FAVICON, m['meta'] % (root, self.presence()),
+                   ''.join(rows) or '<li>%s</li>' % m['none'], m['note'])).encode('utf-8')
 
     def report_listing(self):
         """The list of reports at / (--reports, the root has no index.html); every value is escaped."""
@@ -668,17 +680,22 @@ class Talk:
         for x in self.reports()['rows']:
             meta = ' · '.join(html.escape(v) for v in (x['theme'], x['round'], x['owner'] or m['no_owner'], x['time'])
                               if v)
-            mark = ' <b>%s</b>' % m['unread'] if x['tracked'] and not x['read'] else ''
+            mark = '<b class="u">%s</b>' % m['unread'] if x['tracked'] and not x['read'] else ''
             if x['comments']:
-                mark += ' <span class="c">%s</span>' % html.escape(m['comments'] % ', '.join(x['comments']))
-            rows.append('<li><a href="/%s">%s</a>%s<br><span class="m">%s</span></li>'
+                mark += '<span class="c">%s</span>' % html.escape(m['comments'] % ', '.join(x['comments']))
+            rows.append('<li><a href="/%s"><span class="t">%s</span>%s<span class="m">%s</span></a></li>'
                         % (html.escape(urllib.parse.quote(x['page'])), html.escape(x['title']), mark, meta))
-        return ('<!doctype html><html lang="%s"><head><meta charset="utf-8"><title>%s</title>%s'
-                '<style>body{font:15px/1.6 system-ui,sans-serif;margin:24px 16px;max-width:860px}li{margin:6px 0}'
-                '.m{color:#666;font-size:13px}.c{color:#b45309;font-size:13px}</style></head>'
+        return ('<!doctype html><html lang="%s"><head><meta charset="utf-8">%s<title>%s</title>%s'
+                '<style>:root{color-scheme:light dark}'               # a whole row is the link: a finger-sized target
+                'body{font:15px/1.6 system-ui,sans-serif;margin:24px 16px;max-width:860px;overflow-wrap:break-word}'
+                'h1{font-size:22px}ul{list-style:none;margin:0;padding:0}li{border-top:1px solid #8884}'
+                'li a{display:block;padding:8px 2px;color:inherit;text-decoration:none}li a:hover .t{text-decoration:underline}'
+                '.t{font-weight:600;color:#0a5fb4}.u{margin-left:8px;font-size:12px;color:#cf222e}'
+                '.c{margin-left:8px;font-size:13px;color:#b45309}.m{display:block;color:#888;font-size:13px}'
+                '@media (prefers-color-scheme:dark){.t{color:#6cb6ff}.u{color:#f85149}.c{color:#d29922}}</style></head>'
                 '<body data-talk-listing><h1>%s</h1>'                      # no file behind it: no state, no items
                 '<p class="m">%s</p><ul>%s</ul></body></html>'
-                % (self.lang, html.escape(m['title']), FAVICON, html.escape(m['title']),
+                % (self.lang, VIEWPORT.decode(), html.escape(m['title']), FAVICON, html.escape(m['title']),
                    m['meta'] % html.escape(self.root), ''.join(rows) or '<li>%s</li>' % m['none'])).encode('utf-8')
 
 

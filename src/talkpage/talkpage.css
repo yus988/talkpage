@@ -18,8 +18,10 @@
 .talk-offline { display: none !important; }
 body { padding-bottom: 64px; }
 
-/* an item: the bar and the thread span a grid item's full width */
+/* an item: the bar and the thread span a grid item's full width. The state's stripe on the left: that side's corners
+   square, or the stripe bends along them like a fingernail */
 [data-talk] > .talk-bar, [data-talk] > .talk-thread { grid-column: 1 / -1; }
+[data-talk][data-talk-tone] { border-top-left-radius: 0; border-bottom-left-radius: 0; }
 [data-talk][data-talk-tone="ok"] { box-shadow: inset 4px 0 0 var(--talk-ok); }
 [data-talk][data-talk-tone="ng"] { box-shadow: inset 4px 0 0 var(--talk-ng); }
 [data-talk][data-talk-tone="ask"] { box-shadow: inset 4px 0 0 var(--talk-ask); }
@@ -75,8 +77,9 @@ body { padding-bottom: 64px; }
 .talk-presence[data-p="listening"]::before { color: var(--talk-ok); }
 .talk-presence[data-p="working"]::before { color: var(--talk-ask); }
 .talk-presence[data-p="down"]::before { content: "×"; color: var(--talk-ng); }
-@media (max-width: 640px) {
+@media (max-width: 699px) {
   .talk-dock { left: 8px; right: 8px; bottom: 8px; flex-wrap: wrap; justify-content: flex-end; gap: 6px 10px; }
+  .talk-has-sb .talk-dock { left: 62px; }               /* the sidebar's button sits at the bottom left */
   .talk-presence { min-width: 0; }
 }
 .talk-flash { animation: talk-flash 1.4s ease-out; }
@@ -192,7 +195,7 @@ body { padding-bottom: 64px; }
 .talk-sb-meta { display: block; font-size: 11px; color: var(--talk-muted); }
 .talk-sb-row.talk-unread .talk-sb-t { font-weight: 700; }
 .talk-sb-row.talk-unread .talk-sb-t::before { content: "\25CF  "; color: var(--talk-accent); }
-.talk-sb-row.talk-here, .talk-toc.talk-here { background: var(--talk-agent-bg); box-shadow: inset 3px 0 0 var(--talk-accent); }
+.talk-sb-row.talk-here, .talk-toc.talk-here { background: var(--talk-agent-bg); color: var(--talk-accent); }
 .talk-sb-new { margin-left: 6px; padding: 0 5px; font-size: 10px; font-weight: 700; color: #fff; background: var(--talk-ng); border-radius: 8px; }
 .talk-toc { padding-left: 8px; }
 .talk-toc-h2 { padding-left: 20px; }
@@ -200,3 +203,31 @@ body { padding-bottom: 64px; }
 .talk-sb-empty { margin: 4px 8px; color: var(--talk-muted); }
 .talk-sb-grip { position: absolute; top: 0; right: -3px; bottom: 0; width: 6px; cursor: col-resize; }
 .talk-sb-grip:hover { background: var(--talk-line); }
+.talk-sb-back { position: fixed; inset: 0; z-index: 989; background: rgba(0, 0, 0, .35); }
+.talk-sb-back[hidden], .talk-unzoom[hidden] { display: none; }
+
+/* after a pinch zoom (placed by talkpage.js on what is on screen) */
+.talk-unzoom {
+  position: fixed; left: 0; top: 0; z-index: 1003; transform-origin: 0 0; font: 600 15px/1.5 system-ui, sans-serif; color: #fff;
+  background: var(--talk-accent); border: 0; border-radius: 18px; padding: 6px 16px; box-shadow: 0 2px 10px rgba(0, 0, 0, .3); cursor: pointer;
+}
+
+/* phones: the report keeps to the screen's width (no sideways scrolling), the browser's pinch zoom replaces the
+   report's zoom, the sidebar opens from a round button at the bottom left */
+@media (max-width: 699px) {
+  body { overflow-wrap: break-word; }
+  body img, body video { max-width: 100%; height: auto; }
+  body svg[viewBox] { max-width: 100%; height: auto; }
+  body pre { max-width: 100%; overflow-x: auto; }
+  body table { display: block; max-width: 100%; overflow-x: auto; }
+  textarea, input, select { font-size: 16px !important; }   /* below 16px iOS zooms in on a tap and stays there */
+  .talk-sbbar {
+    left: 10px; top: auto; bottom: 10px; width: 46px; height: 46px; padding: 0; justify-content: center; border-radius: 50%;
+  }
+  .talk-sbbar .talk-sb-zbtn, .talk-sbbar .talk-sb-zoom, .talk-sbbar .talk-sb-fit { display: none; }
+  .talk-sbbar .talk-sb-tog { width: 46px; height: 46px; padding: 0; font-size: 20px !important; border: 0; }
+  .talk-sb { width: min(86vw, 340px) !important; padding: 8px 0 66px; font-size: 14px; }
+  .talk-sb-grip { display: none; }
+  .talk-sb-head, .talk-sb-ghead { padding-top: 8px; padding-bottom: 8px; }
+  .talk-sb-row, .talk-toc { padding-top: 7px; padding-bottom: 8px; }
+}

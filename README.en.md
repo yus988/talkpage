@@ -205,8 +205,9 @@ round of each theme (the earlier ones are linked from the theme's `index.html`).
 page (key: its folder for an `index.html`, else its path). Folders starting with `.` or `_` are skipped.
 
 **Serving**: an HTML page under the root gets `talkpage.css` and `talkpage.js` (with `data-talk-report`) before
-`</body>` in the response; the file is not changed, and a page that loads talkpage.js itself is left as it is. Without
-an `index.html` at the root, `/` is the list of reports.
+`</body>` in the response; the file is not changed, and a page that loads talkpage.js itself is left as it is. A page
+without `<meta name="viewport">` gets one too (without it a phone lays the page out wider than the screen and it slides
+sideways). Without an `index.html` at the root, `/` is the list of reports.
 
 **On the page**
 
@@ -224,7 +225,13 @@ an `index.html` at the root, `/` is the list of reports.
 - The sidebar (☰ at the top left): zoom of the report −, 100%, + (also Ctrl+wheel) and "Fit width". "Reports" lists
   the reports by owner, unread ones (the last round without "Read") in bold with ●, and "new" on rows that appeared
   after the page was opened; "This page" lists the h1–h3 headings. Folds, width (200–520 px), open or closed and the
-  zoom stay in this browser. Under 900 px wide it opens over the report and starts closed
+  zoom stay in this browser. Under 900 px wide it opens over the report (a tap outside closes it) and starts closed
+- On a phone (under 700 px wide) the report keeps to the screen's width: grids made for a wide screen fall into one
+  column, overflowing rows wrap, tables and code scroll inside their box. Zooming is the browser's pinch zoom; the
+  report's zoom and "Fit width" are not shown, and after a pinch zoom a "100%" button at the top right brings the page
+  back. ☰ is a round button at the bottom left. Text fields use 16 px (smaller ones make iOS zoom in on a tap and stay)
+- A rounded box with a thick line on one side only (a state's colour stripe) bends the line along the corners like a
+  fingernail; that side's corners are shown square (the report's own CSS is mended so as it is served)
 - The last round of a theme ends with a "Did you read this report" item (Read / Again; does not wake the agent)
 - A hidden tab stops long polling and asks every 20 s (a browser keeps at most 6 connections to one server); it goes
   back to long polling as soon as it is shown

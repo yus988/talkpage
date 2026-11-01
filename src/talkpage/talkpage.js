@@ -1114,7 +1114,36 @@
   // ---------------------------------------------------------------- reports: the sidebar
   var PREFS = 'talk-sidebar';
   var sb = { open: true, width: 280, fold: {}, zoom: 1 };
-  var sbEl = null, sbTog = null, zoomLabel = null, rp = null, tp = null, tocLinks = [], tocQueued = false;
+  var sbEl = null, sbTog = null, sbBack = null, zoomLabel = null, rp = null, tp = null, tocLinks = [], tocQueued = false;
+  var unzoomBtn = null;
+
+  // the layout's width (window.innerWidth follows pinch zoom on iOS). Under 900 the sidebar lies over the report;
+  // under 700 (a phone) the browser's own pinch zoom replaces the report's zoom
+  function layoutWidth() { return document.documentElement.clientWidth; }
+  function phone() { return layoutWidth() < 700; }
+
+  // the report's own styles, mended in place. A rounded box with a stripe on one side: that side's corners square (the
+  // stripe would bend along them like a fingernail). On a phone, a grid or a row of boxes made for a wide screen and
+  // wider than its place: one column, or wrapped
+  function mendReport() {
+    var all = content.querySelectorAll('*'), narrow = phone();
+    for (var i = 0; i < all.length && i < 8000; i++) {
+      var e = all[i];
+      if (ours(e)) continue;
+      var s = getComputedStyle(e), d = s.display;
+      var other = Math.max(parseFloat(s.borderTopWidth) || 0, parseFloat(s.borderBottomWidth) || 0);
+      [['Left', 'borderTopLeftRadius', 'borderBottomLeftRadius'], ['Right', 'borderTopRightRadius', 'borderBottomRightRadius']]
+        .forEach(function (k) {
+          var w = parseFloat(s['border' + k[0] + 'Width']) || 0;
+          if (w >= 3 && w > other * 2 && (parseFloat(s[k[1]]) || parseFloat(s[k[2]]))) e.style[k[1]] = e.style[k[2]] = '0';
+        });
+      if (!narrow || e.scrollWidth <= e.clientWidth + 1) continue;
+      if (d === 'grid' || d === 'inline-grid') e.style.gridTemplateColumns = 'minmax(0, 1fr)';
+      else if ((d === 'flex' || d === 'inline-flex') && s.flexWrap === 'nowrap' && s.flexDirection.indexOf('row') === 0) {
+        e.style.flexWrap = 'wrap';
+      }
+    }
+  }
   var reportsOff = false, reportsFirst = null, reportsTimer = 0;
 
   function loadPrefs() {
@@ -1168,7 +1197,10 @@
 
   function buildSidebar() {
     loadPrefs();
-    if (window.innerWidth < 900) sb.open = false;          // over the report on a narrow window: closed at first
+    if (layoutWidth() < 900) sb.open = false;              // over the report on a narrow window: closed at first
+    if (phone()) sb.zoom = 1;
+    document.documentElement.classList.add('talk-has-sb');
+    mendReport();
     var bar = el('div', 'talk-ui talk-sbbar');
     sbTog = button('talk-sb-tog', '☰');
     sbTog.title = tr('sb.toggle');
@@ -1189,10 +1221,20 @@
     var grip = el('div', 'talk-sb-grip');
     grip.title = tr('sb.grip');
     [rp.sec, tp.sec, grip].forEach(function (x) { sbEl.appendChild(x); });
-    document.body.appendChild(sbEl);
-    document.body.appendChild(bar);
+    sbBack = el('div', 'talk-ui talk-sb-back');            // a tap outside the sidebar lying over the report closes it
+    sbBack.hidden = true;
+    unzoomBtn = button('talk-ui talk-unzoom', '100%');
+    unzoomBtn.title = tr('sb.zoomreset');
+    unzoomBtn.hidden = true;
+    [sbBack, sbEl, bar, unzoomBtn].forEach(function (x) { document.body.appendChild(x); });
     buildToc(tp.body);
     sbTog.addEventListener('click', function () { setOpen(!sb.open, true); });
+    sbBack.addEventListener('click', function () { setOpen(false, false); });
+    unzoomBtn.addEventListener('click', unzoom);
+    if (window.visualViewport) {
+      visualViewport.addEventListener('resize', placeUnzoom);
+      visualViewport.addEventListener('scroll', placeUnzoom);
+    }
     minus.addEventListener('click', function () { zoomBy(-0.1); });
     plus.addEventListener('click', function () { zoomBy(0.1); });
     zoomLabel.addEventListener('click', function () { applyZoom(1); savePrefs(); });
@@ -1235,7 +1277,7 @@
     sb.open = on;
     sbEl.hidden = !on;
     sbTog.setAttribute('aria-expanded', String(on));
-    if (save && window.innerWidth >= 900) savePrefs();
+    if (save && layoutWidth() >= 900) savePrefs();
     placeContent();
   }
 
@@ -1243,7 +1285,8 @@
   function placeContent() {
     if (!content) return;
     content.style.left = '';
-    if (sbEl && sb.open && window.innerWidth >= 900) {
+    if (sbBack) sbBack.hidden = !(sb.open && layoutWidth() < 900);
+    if (sbEl && sb.open && layoutWidth() >= 900) {
       var r = content.getBoundingClientRect(), right = sbEl.getBoundingClientRect().right + 12;
       if (r.left < right) {
         if (getComputedStyle(content).position === 'static') content.style.position = 'relative';
@@ -1263,10 +1306,29 @@
   }
   function zoomBy(d) { applyZoom(Math.round((sb.zoom + d) * 10) / 10); savePrefs(); }
 
+  // after a pinch zoom: "100%" at the top right of what is on screen, its size kept (a fixed element sits on the layout
+  // viewport, which the visual viewport moves over and magnifies)
+  function placeUnzoom() {
+    var v = window.visualViewport, on = !!v && v.scale > 1.05;
+    unzoomBtn.hidden = !on;
+    if (!on) return;
+    var s = 1 / v.scale;
+    unzoomBtn.style.transform = 'translate(' + (v.offsetLeft + v.width - 10 * s) + 'px, ' + (v.offsetTop + 10 * s) +
+      'px) scale(' + s + ') translateX(-100%)';
+  }
+  // a maximum scale of 1 for a moment brings the page back to its width
+  function unzoom() {
+    var m = document.querySelector('meta[name="viewport"]');
+    if (!m) return;
+    var was = m.getAttribute('content') || '';
+    m.setAttribute('content', was.replace(/,?\s*maximum-scale\s*=[^,]*/i, '') + ', maximum-scale=1');
+    setTimeout(function () { m.setAttribute('content', was); placeUnzoom(); }, 400);
+  }
+
   // the zoom at which the report spans from the sidebar to the window's right edge less the comments' margin
   function fitZoom() {
     var r = content.getBoundingClientRect();
-    var left = sb.open && window.innerWidth >= 900 ? sbEl.getBoundingClientRect().right + 12 : 12;
+    var left = sb.open && layoutWidth() >= 900 ? sbEl.getBoundingClientRect().right + 12 : 12;
     var avail = document.documentElement.clientWidth - left - (CARD_MAX + 24);
     if (r.width > 0 && avail > 0) applyZoom(avail / (r.width / sb.zoom));
     savePrefs();
@@ -1282,7 +1344,7 @@
         if (e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;
         e.preventDefault();
         h.scrollIntoView({ block: 'start', behavior: 'smooth' });
-        if (window.innerWidth < 900) setOpen(false, false);
+        if (layoutWidth() < 900) setOpen(false, false);
       });
       box.appendChild(a);
       tocLinks.push({ h: h, a: a });

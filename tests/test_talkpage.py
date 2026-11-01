@@ -317,15 +317,19 @@ class ReportsTest(unittest.TestCase):
 
     def test_inject(self):
         code, body, head = self.req('/review/', info=True)
-        self.assertEqual(body, b'<html lang="ja"><title>&lt;b&gt;review</title><BODY>x' + tp.INJECT + b'</BODY></html>')
+        self.assertEqual(body, b'<html lang="ja">' + tp.VIEWPORT + b'<title>&lt;b&gt;review</title><BODY>x' + tp.INJECT +
+                         b'</BODY></html>')
         self.assertEqual(int(head['Content-Length']), len(body))
         self.assertTrue(self.req('/survey-20261016.html')[1].endswith(b'no body' + tp.INJECT))
-        self.assertEqual(self.req('/own/')[1], b'<body><script src="/_talk/talkpage.js"></script></body>')
+        self.assertEqual(self.req('/own/')[1], tp.VIEWPORT + b'<body><script src="/_talk/talkpage.js"></script></body>')
         self.assertEqual(self.req('/style.css')[1], b'body{}')
         self.assertEqual(self.req('/data.json')[1], {'a': '</body>'})
         with open(self.single, encoding='utf-8') as f:
             self.assertNotIn('talkpage', f.read())                  # the file stays as it is
-        self.assertEqual(tp.inject(b'a</body>b</body>'), b'a</body>b' + tp.INJECT + b'</body>')
+        self.assertEqual(tp.inject(b'a</body>b</body>'), tp.VIEWPORT + b'a</body>b' + tp.INJECT + b'</body>')
+        doc = b'<!DOCTYPE html><HEAD lang=x><meta name=viewport content="width=500"></head>'
+        self.assertEqual(tp.inject(doc), doc + tp.INJECT)                        # its own viewport stays
+        self.assertEqual(tp.inject(b'<!doctype html><p>'), b'<!doctype html>' + tp.VIEWPORT + b'<p>' + tp.INJECT)
 
     def test_list(self):
         rows = self.rows()
