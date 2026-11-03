@@ -296,7 +296,9 @@ sidebar marks starred rows with ★; under `--place` it groups the reports by he
 - The sidebar (☰ at the top left): zoom of the report −, 100%, + (also Ctrl+wheel) and "Fit width"; the comment cards
   and the whole-thread view grow with the same zoom (Ctrl+wheel over the whole thread zooms the report too, and "Fit
   width" leaves room for the zoomed cards). A change of the zoom keeps the place being read: Ctrl+wheel keeps the
-  line under the pointer, the buttons and "Fit width" the line in the middle of the window. "Reports" lists the reports by owner, unread ones (the last round without
+  line under the pointer, the buttons and "Fit width" the line in the middle of the window. When the zoomed report
+  and the cards' margin do not fit side by side, the report starts just right of the sidebar and narrows by the
+  cards' room (the same text size, its lines wrap anew), so the cards never cover it. "Reports" lists the reports by owner, unread ones (the last round without
   "Read") in bold with ●, and "new" on rows that appeared after the page was opened; its heading shows "Unread n" for
   all of them ("(new n)" added, in bold, when some came after the page was opened), each owner's heading its own. One
   line per report (a long title cut with …, its round and time after it, going to a second line only when they do not

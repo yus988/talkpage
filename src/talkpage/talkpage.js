@@ -1589,16 +1589,26 @@
   // the report keeps its place; only where the sidebar would cover it, it moves right by that much
   function placeContent() {
     if (!content) return;
-    content.style.left = '';
+    content.style.left = content.style.maxWidth = '';
     if (sbBack) sbBack.hidden = !(sb.open && layoutWidth() < 900);
-    if (sbEl && sb.open && layoutWidth() >= 900) {
-      var r = content.getBoundingClientRect(), right = sbEl.getBoundingClientRect().right + 12;
-      if (r.left < right) {
-        if (getComputedStyle(content).position === 'static') content.style.position = 'relative';
-        content.style.left = (right - r.left) / sb.zoom + 'px';     // a length on a zoomed element is zoomed too
-      }
+    var side = sbEl && sb.open && layoutWidth() >= 900, right = side ? sbEl.getBoundingClientRect().right + 12 : 12;
+    var narrowed = roomForCards(right), r = content.getBoundingClientRect();
+    if (narrowed || (side && r.left < right)) {
+      if (getComputedStyle(content).position === 'static') content.style.position = 'relative';
+      content.style.left = (right - r.left) / sb.zoom + 'px';     // a length on a zoomed element is zoomed too
     }
     relayout();
+  }
+  // the cards never cover the report: when the zoomed report and a margin for the cards do not fit side by side right
+  // of the sidebar (x), the report starts at x and narrows to what is left (the same size, its lines wrap anew). Not in
+  // a window too narrow even for that: there the margin gets numbers only
+  function roomForCards(x) {
+    if (!scopes.length) return false;
+    var z = sb.zoom, r = content.getBoundingClientRect(), vw = document.documentElement.clientWidth;
+    var room = vw - x - MARGIN_MIN * z - 24;
+    if (Math.max(r.left, x) + r.width <= vw - MARGIN_MIN * z || room < 320) return false;
+    content.style.maxWidth = room / z + 'px';
+    return true;
   }
 
   // what is at the window's height y in the report: a line of text there (tried across the report), else the smallest
@@ -1684,6 +1694,7 @@
   // the zoom at which the report spans from the sidebar to the window's right edge less the comments' margin; the
   // cards grow with the same zoom: (report + card) × zoom + the gaps = the room
   function fitZoom() {
+    content.style.maxWidth = '';                           // the report's own width, not the one narrowed for the cards
     var r = content.getBoundingClientRect(), cards = scopes.length ? CARD_MAX : 0;
     var left = sb.open && layoutWidth() >= 900 ? sbEl.getBoundingClientRect().right + 12 : 12;
     var avail = document.documentElement.clientWidth - left - (cards ? 24 : 12);
