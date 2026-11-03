@@ -587,7 +587,7 @@
   var cards = {};           // id -> comment card of an item <prefix><number> the server keeps
   var draft = null;         // the card of a comment not sent yet (not on the server)
   var openNow = null, big = null, showResolved = false;
-  var layer = null, selBtn = null, selEdit = null, content = null, layoutQueued = false;
+  var layer = null, selLayer = null, selBtn = null, selEdit = null, content = null, layoutQueued = false;
   var touched = false, selTimer = 0;            // the last pointer was a finger; the wait for a touch selection
   var marks = !!(window.CSS && CSS.highlights && typeof Highlight === 'function');
 
@@ -1058,8 +1058,10 @@
     });
     b.ta.addEventListener('input', function () { c.ta.value = b.ta.value; keepDraft(c); });
     b.res.addEventListener('click', function () { resolveCard(c); });
+    b.box = box;
     big = b;
     document.body.appendChild(m);
+    zoomBig();
     c.visible = true;
     renderBig();
     seen(c);
@@ -1078,6 +1080,16 @@
     }
     big.res.hidden = !!c.draft;
     big.res.textContent = tr(c.resolved ? 'restore' : 'resolve');
+  }
+
+  // the whole thread grows with the report's zoom like the cards (the dark background around it stays as it is);
+  // Ctrl + wheel over it zooms the report, so the thread with it
+  function zoomBig() {
+    var z = cardZoom(), s = big.box.style;
+    if (z === 1) { s.zoom = s.width = s.maxHeight = ''; return; }
+    s.zoom = String(z);
+    s.width = Math.min(760 * z, document.documentElement.clientWidth - 32) / z + 'px';
+    s.maxHeight = window.innerHeight * 0.86 / z + 'px';
   }
 
   // quiet: only take it away (another view replaces it)
@@ -1133,10 +1145,16 @@
     setTimeout(run, 100);                  // a page drawn in the background gets no animation frames
   }
 
-  // cards beside their marks in the right margin, each below the one above; a narrow margin gets numbers only
+  // the report's zoom (the sidebar's − 100% ＋ and "fit"): the cards and the whole thread grow with it
+  function cardZoom() { return SIDEBAR && content ? sb.zoom : 1; }
+
+  // cards beside their marks in the right margin, each below the one above; a narrow margin gets numbers only. The
+  // layer of the cards is zoomed like the report: the places are worked out on the screen and divided by the zoom
   function layout() {
     if (!layer) return;
-    var base = layer.getBoundingClientRect(), vw = document.documentElement.clientWidth;
+    var z = cardZoom(), base = layer.getBoundingClientRect(), vw = document.documentElement.clientWidth;
+    layer.style.zoom = z === 1 ? '' : String(z);
+    if (big) zoomBig();
     scopes.forEach(function (s) {
       var all = cardList().filter(function (c) { return c.scope === s; });
       if (draft && draft.scope === s) all.push(draft);
@@ -1148,8 +1166,8 @@
       all.forEach(function (c) { if (c.range === undefined) place(s, c); });
       var sr = s.root.getBoundingClientRect();
       var margin = vw - sr.right;
-      s.pins = margin < MARGIN_MIN;
-      var w = Math.min(CARD_MAX, margin - 24), rows = [], lost = 0;
+      s.pins = margin < MARGIN_MIN * z;
+      var w = Math.min(CARD_MAX * z, margin - 24), rows = [], lost = 0;
       all.forEach(function (c) {
         var shown = !c.resolved || showResolved;
         c.el.hidden = !shown;
@@ -1173,16 +1191,17 @@
         if (s.pins) {
           c.el.hidden = true;
           c.pin.hidden = false;
+          var pr = c.pin.getBoundingClientRect();
           top = Math.max(r.top, bottom + 4);
-          c.pin.style.top = top + 'px';
-          c.pin.style.left = vw - c.pin.offsetWidth - 6 - base.left + 'px';
-          bottom = top + c.pin.offsetHeight;
+          c.pin.style.top = top / z + 'px';
+          c.pin.style.left = (vw - pr.width - 6 - base.left) / z + 'px';
+          bottom = top + pr.height;
         } else {
-          c.el.style.width = w + 'px';
-          c.el.style.left = sr.right + 12 - base.left + 'px';
-          top = Math.max(r.top, bottom + CARD_GAP);
-          c.el.style.top = top + 'px';
-          bottom = top + c.el.offsetHeight;
+          c.el.style.width = w / z + 'px';
+          c.el.style.left = (sr.right + 12 - base.left) / z + 'px';
+          top = Math.max(r.top, bottom + CARD_GAP * z);
+          c.el.style.top = top / z + 'px';
+          bottom = top + c.el.getBoundingClientRect().height;
         }
       });
       s.lost.hidden = !lost;
@@ -1211,7 +1230,7 @@
     selBtn.hidden = false;
     selEdit.hidden = !selEdit.block;
     var rects = r.getClientRects(), last = rects[rects.length - 1] || r.getBoundingClientRect();
-    var base = layer.getBoundingClientRect(), vw = document.documentElement.clientWidth;
+    var base = selLayer.getBoundingClientRect(), vw = document.documentElement.clientWidth;
     var w = selBtn.offsetWidth + (selEdit.block ? selEdit.offsetWidth + 4 : 0);
     var left = Math.max(4, Math.min(last.right + 4, vw - w - 8)) - base.left;
     var top = last.bottom + (touched ? 28 : 4) - base.top + 'px';           // below a phone's selection handle
@@ -1278,8 +1297,10 @@
       s.lost.appendChild(s.lostList);
       s.root.appendChild(s.lost);
     });
-    layer = el('div', 'talk-ui talk-layer');
+    layer = el('div', 'talk-ui talk-layer');                 // the cards (zoomed with the report)
+    selLayer = el('div', 'talk-ui talk-layer');              // the selection's buttons (never zoomed)
     document.body.appendChild(layer);
+    document.body.appendChild(selLayer);
     selBtn = button('talk-ui talk-selbtn', tr('comment'));
     selEdit = button('talk-ui talk-selbtn talk-seledit', tr('edit'));
     selEdit.title = tr('edit.one.title');
@@ -1290,7 +1311,7 @@
     }
     [selBtn, selEdit].forEach(function (b) {
       b.hidden = true;
-      layer.appendChild(b);
+      selLayer.appendChild(b);
       b.addEventListener('mousedown', function (e) { e.preventDefault(); });      // keeps the selection
       b.addEventListener('click', function () { onSelBtn(b); });
       // a touch selection (long press, then the handles) sends no mouseup: follow selectionchange once it settles.
@@ -1592,12 +1613,13 @@
     setTimeout(function () { m.setAttribute('content', was); placeUnzoom(); }, 400);
   }
 
-  // the zoom at which the report spans from the sidebar to the window's right edge less the comments' margin
+  // the zoom at which the report spans from the sidebar to the window's right edge less the comments' margin; the
+  // cards grow with the same zoom: (report + card) × zoom + the gaps = the room
   function fitZoom() {
-    var r = content.getBoundingClientRect();
+    var r = content.getBoundingClientRect(), cards = scopes.length ? CARD_MAX : 0;
     var left = sb.open && layoutWidth() >= 900 ? sbEl.getBoundingClientRect().right + 12 : 12;
-    var avail = document.documentElement.clientWidth - left - (CARD_MAX + 24);
-    if (r.width > 0 && avail > 0) applyZoom(avail / (r.width / sb.zoom));
+    var avail = document.documentElement.clientWidth - left - (cards ? 24 : 12);
+    if (r.width > 0 && avail > 0) applyZoom(avail / (r.width / sb.zoom + cards));
     savePrefs();
   }
 

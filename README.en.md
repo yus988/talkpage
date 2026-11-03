@@ -293,7 +293,9 @@ sidebar marks starred rows with ★; under `--place` it groups the reports by he
 - "Resolved" hides the card and its highlight without waking the agent; the dock's "Resolved n" shows them faded,
   each with "Reopen"
 - A reply never opens a closed card; it is marked "New reply" and counted as `(n)` at the start of the tab's name
-- The sidebar (☰ at the top left): zoom of the report −, 100%, + (also Ctrl+wheel) and "Fit width". "Reports" lists
+- The sidebar (☰ at the top left): zoom of the report −, 100%, + (also Ctrl+wheel) and "Fit width"; the comment cards
+  and the whole-thread view grow with the same zoom (Ctrl+wheel over the whole thread zooms the report too, and "Fit
+  width" leaves room for the zoomed cards). "Reports" lists
   the reports by owner, unread ones (the last round without "Read") in bold with ●, and "new" on rows that appeared
   after the page was opened, one line per report (a long title cut with …, its round and time after it, going to a
   second line only when they do not fit; the whole title in the tooltip). Below it, this page's h1–h3 headings, always
