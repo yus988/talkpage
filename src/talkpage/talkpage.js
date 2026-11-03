@@ -1360,7 +1360,10 @@
 
   // ---------------------------------------------------------------- reports: the sidebar
   var PREFS = 'talk-sidebar';
-  var sb = { open: true, width: 280, fold: {}, zoom: 1, rh: 0 };      // rh: the reports' height, 0 for half
+  // the width at first is 340 px; a saved 280 is the first default (saved with the other settings, not chosen), so it
+  // moves up too. rh: the reports' height, 0 for half
+  var SB_W = 340, OLD_SB_W = 280;
+  var sb = { open: true, width: SB_W, fold: {}, zoom: 1, rh: 0 };
   var sbEl = null, sbTog = null, sbBack = null, zoomLabel = null, rp = null, tp = null, tocLinks = [], tocQueued = false;
   var unzoomBtn = null, homeLink = null;
 
@@ -1400,7 +1403,7 @@
       var v = JSON.parse(localStorage.getItem(PREFS) || 'null');
       if (v && typeof v === 'object') {
         if (typeof v.open === 'boolean') sb.open = v.open;
-        if (typeof v.width === 'number') sb.width = Math.max(200, Math.min(520, v.width));
+        if (typeof v.width === 'number') sb.width = v.width === OLD_SB_W ? SB_W : Math.max(200, Math.min(640, v.width));
         if (v.fold && typeof v.fold === 'object') sb.fold = v.fold;
         if (typeof v.zoom === 'number' && v.zoom > 0) sb.zoom = v.zoom;
         if (typeof v.rh === 'number' && v.rh >= 0) sb.rh = v.rh;
@@ -1510,7 +1513,7 @@
       e.preventDefault();
       grip.setPointerCapture(e.pointerId);
       function move(ev) {
-        sb.width = Math.max(200, Math.min(520, Math.round(ev.clientX)));
+        sb.width = Math.max(200, Math.min(640, Math.round(ev.clientX)));
         sbEl.style.width = sb.width + 'px';
         placeContent();
       }

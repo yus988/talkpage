@@ -211,7 +211,7 @@ body { padding-bottom: 64px; }
 .talk-sb-zoom { min-width: 3.6em; }
 .talk-sb {
   position: fixed; left: 0; top: 0; bottom: 0; z-index: 8; box-sizing: border-box; display: flex; flex-direction: column;
-  padding: 44px 0 8px; font: 13px/1.5 system-ui, sans-serif; color: var(--talk-fg); background: var(--talk-bg); border-right: 1px solid var(--talk-line);
+  padding: 44px 0 8px; font: 15px/1.55 system-ui, sans-serif; color: var(--talk-fg); background: var(--talk-bg); border-right: 1px solid var(--talk-line);
 }
 @media (max-width: 899px) { .talk-sb { box-shadow: 4px 0 18px rgba(0, 0, 0, .2); } }
 .talk-sb-pane { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; }
@@ -230,41 +230,41 @@ body { padding-bottom: 64px; }
 .talk-sb-head[aria-expanded="false"]::before, .talk-sb-ghead[aria-expanded="false"]::before { content: "\25B8"; }
 .talk-sb-body { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 8px 6px; }
 .talk-sb-ghead { padding: 4px 4px 2px; font-weight: 600; }
-.talk-sb-gunread { font-size: 11px; font-weight: 600; color: var(--talk-accent); }
+.talk-sb-gunread { font-size: 13px; font-weight: 600; color: var(--talk-accent); }
 .talk-sb-row, .talk-toc { display: block; padding: 2px 6px 3px 16px; border-radius: 4px; color: var(--talk-fg); text-decoration: none; }
 .talk-sb-row:hover, .talk-toc:hover { background: var(--talk-user-bg); }
 .talk-sb-all { padding-left: 6px; margin-bottom: 4px; color: var(--talk-accent); }
 /* a report: one line, the name cut with …; its round and time after it, on a second line only when they do not fit */
 .talk-sb-text { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; min-width: 0; }
 .talk-sb-t { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.talk-sb-meta { flex: none; font-size: 11px; color: var(--talk-muted); white-space: nowrap; }
+.talk-sb-meta { flex: none; font-size: 13px; color: var(--talk-muted); white-space: nowrap; }
 .talk-sb-row.talk-unread .talk-sb-t { font-weight: 700; }
 .talk-sb-row.talk-unread .talk-sb-t::before { content: "\25CF  "; color: var(--talk-accent); }
 .talk-sb-row.talk-here, .talk-toc.talk-here { background: var(--talk-agent-bg); color: var(--talk-accent); }
-.talk-sb-new { flex: none; padding: 0 5px; font-size: 10px; font-weight: 700; color: #fff; background: var(--talk-ng); border-radius: 8px; }
+.talk-sb-new { flex: none; padding: 0 5px; font-size: 11px; font-weight: 700; color: #fff; background: var(--talk-ng); border-radius: 8px; }
 /* a submission: [▸] Submission title — the button shows the reports it is based on, the title opens the page */
 .talk-sb-subhead { display: flex; align-items: center; gap: 4px; padding-left: 2px; border-radius: 4px; }
 .talk-sb-subhead.talk-here { background: var(--talk-agent-bg); }
 .talk-sb-subhead .talk-sb-row { flex: 1; min-width: 0; padding-left: 2px; }
 .talk-sb-subhead .talk-sb-gunread { flex: none; white-space: nowrap; padding-right: 4px; }
 .talk-sb-open {
-  flex: none; width: 20px; height: 20px; padding: 0; font: inherit; font-size: 11px; line-height: 18px; color: var(--talk-muted);
+  flex: none; width: 22px; height: 22px; padding: 0; font: inherit; font-size: 12px; line-height: 20px; color: var(--talk-muted);
   background: none; border: 1px solid var(--talk-line); border-radius: 4px; cursor: pointer;
 }
 .talk-sb-open:hover { color: var(--talk-fg); border-color: var(--talk-muted); }
 .talk-sb-open::before { content: "\25BE"; }
 .talk-sb-open[aria-expanded="false"]::before { content: "\25B8"; }
 .talk-sb-tag {
-  flex: none; padding: 0 4px; font-size: 11px; font-weight: 700; line-height: 1.5; color: var(--talk-accent);
+  flex: none; padding: 0 4px; font-size: 12px; font-weight: 700; line-height: 1.5; color: var(--talk-accent);
   border: 1px solid var(--talk-accent); border-radius: 3px;
 }
 .talk-sb-subbody { margin-left: 11px; padding-left: 2px; border-left: 1px solid var(--talk-line); }
 .talk-sb-subbody[hidden] { display: none; }
-.talk-sb-note { flex: none; font-size: 11px; color: var(--talk-muted); white-space: nowrap; }
+.talk-sb-note { flex: none; font-size: 13px; color: var(--talk-muted); white-space: nowrap; }
 .talk-sb-other { padding: 0 4px; border: 1px solid var(--talk-line); border-radius: 3px; }   /* another owner's report */
 .talk-toc { padding-left: 8px; }
 .talk-toc-h2 { padding-left: 20px; }
-.talk-toc-h3 { padding-left: 32px; font-size: 12px; }
+.talk-toc-h3 { padding-left: 32px; font-size: 14px; }
 .talk-sb-empty { margin: 4px 8px; color: var(--talk-muted); }
 .talk-sb-grip { position: absolute; top: 0; right: -3px; bottom: 0; width: 6px; cursor: col-resize; }
 .talk-sb-grip:hover { background: var(--talk-line); }
@@ -296,7 +296,7 @@ body { padding-bottom: 64px; }
   .talk-sbbar .talk-sb-home { padding: 0 16px 0 4px; font-size: 15px; line-height: 46px; }
   .talk-sbbar .talk-sb-zbtn, .talk-sbbar .talk-sb-zoom, .talk-sbbar .talk-sb-fit { display: none; }
   .talk-sbbar .talk-sb-tog { width: 46px; height: 46px; padding: 0; font-size: 20px !important; border: 0; }
-  .talk-sb { width: min(86vw, 340px) !important; padding: 8px 0 66px; font-size: 14px; }
+  .talk-sb { width: min(86vw, 340px) !important; padding: 8px 0 66px; font-size: 15px; }
   .talk-sb-grip { display: none; }
   .talk-sb-head, .talk-sb-ghead { padding-top: 8px; padding-bottom: 8px; }
   .talk-sb-row, .talk-toc { padding-top: 7px; padding-bottom: 8px; }
