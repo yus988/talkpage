@@ -274,7 +274,9 @@ sidebar marks starred rows with ★; under `--place` it groups the reports by he
 
 - Selecting text shows a "Comment" button (on a phone: select by a long press, and it shows below the selection once
   the finger rests); it opens a card in the right margin, and the item (`C1`, `C2`, …, titled with the selected text)
-  is made by the first send. Leaving without sending (a click elsewhere, Esc) drops it
+  is made by the first send. A card not sent yet stays, closed, after a click elsewhere or Esc, also with nothing
+  written (one can talk to voice input while looking elsewhere; any number of them), until its "Delete" (in the place
+  of "Resolve") is pressed; it lasts while the page is open in this browser
 - The commented text gets a yellow highlight (darker for the open card; CSS Custom Highlight API); clicking it opens
   the card
 - When the text has changed (a new round, an edit) and is not found, the card goes near its old place (≈ before its

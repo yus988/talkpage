@@ -64,6 +64,7 @@
       'status.resolved': 'Resolved',
       'resolve': 'Resolve',
       'restore': 'Restore',
+      'delete': 'Delete',
       'expand': 'Show the whole thread',
       'close': 'Close',
       'lost': 'Comments not found in the text',
@@ -146,6 +147,7 @@
       'status.resolved': '解決',
       'resolve': '解決',
       'restore': '戻す',
+      'delete': '削除',
       'expand': 'やりとりの全文表示',
       'close': '閉じる',
       'lost': '本文で見つからないコメント',
@@ -595,7 +597,7 @@
   var CARD_MAX = 340, MARGIN_MIN = 240, CARD_GAP = 8;
   var scopes = [];          // {root, prefix, re, lost, lostList, ix, dirty, pins}: where selecting text makes a comment
   var cards = {};           // id -> comment card of an item <prefix><number> the server keeps
-  var draft = null;         // the card of a comment not sent yet (not on the server)
+  var drafts = [];          // the cards of comments not sent yet (not on the server)
   var openNow = null, big = null, showResolved = false;
   var layer = null, selLayer = null, selBtn = null, selEdit = null, content = null, layoutQueued = false;
   var touched = false, selTimer = 0;            // the last pointer was a finger; the wait for a touch selection
@@ -795,7 +797,7 @@
 
   function nextId(prefix) {
     var re = new RegExp('^' + prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(\\d+)$'), max = 0;
-    Object.keys(items).concat(order, Object.keys(cards), taken).forEach(function (id) {
+    Object.keys(items).concat(order, Object.keys(cards), taken, drafts.map(function (d) { return d.id; })).forEach(function (id) {
       var m = re.exec(id);
       if (m) max = Math.max(max, +m[1]);
     });
@@ -852,7 +854,7 @@
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); sendCard(c, c.ta); }
     });
     c.ta.addEventListener('input', function () { keepDraft(c); });
-    c.res.addEventListener('click', function () { resolveCard(c); });
+    c.res.addEventListener('click', function () { if (c.draft) dropDraft(c); else resolveCard(c); });
     if (!isDraft) setDraftKey(c);
     byThread.set(c.el, c);
     if (io) io.observe(c.el);
@@ -903,8 +905,7 @@
       c.shown = it.thread.length;
       c.lines.scrollTop = c.lines.scrollHeight;
     }
-    c.res.hidden = !!c.draft;
-    c.res.textContent = tr(c.resolved ? 'restore' : 'resolve');
+    c.res.textContent = tr(c.draft ? 'delete' : c.resolved ? 'restore' : 'resolve');
     c.el.classList.toggle('talk-done', c.resolved);
     c.el.classList.toggle('talk-open', c.open);
     c.pin.classList.toggle('talk-pin-new', c.unread);      // a reply never opens a card: the page stays still
@@ -915,10 +916,11 @@
   // cards for the items of the server the page does not declare
   function syncCards() {
     if (!scopes.length) return;
-    if (draft && items[draft.id]) {                         // taken meanwhile (another tab): renumber the draft
-      draft.id = nextId(draft.scope.prefix);
-      draft.idEl.textContent = draft.pin.textContent = draft.id;
-    }
+    drafts.forEach(function (d) {
+      if (!items[d.id]) return;                             // taken meanwhile (another tab): renumber the draft
+      d.id = nextId(d.scope.prefix);
+      d.idEl.textContent = d.pin.textContent = d.id;
+    });
     Object.keys(items).forEach(function (id) {
       if (cards[id] || ui[id]) return;
       var s = scopes.filter(function (x) { return x.re.test(id); })[0];
@@ -940,7 +942,6 @@
   }
 
   function closeCard(c) {
-    if (c === draft) { dropDraft(); return; }
     c.open = false;
     c.el.classList.remove('talk-open');
     c.bub.setAttribute('aria-expanded', 'false');
@@ -950,13 +951,13 @@
   }
 
   function newDraft(x) {
-    dropDraft();
     if (openNow) closeCard(openNow);
     var s = x.scope, ix = index(s.root);
     var title = squash(x.text).slice(0, 200).trim();
     if (!find(ix, title)) title = rangeText(s.root, x.range).slice(0, 200).trim();
     if (!title) return;
-    var c = draft = makeCard(nextId(s.prefix), s, title, true);
+    var c = makeCard(nextId(s.prefix), s, title, true);
+    drafts.push(c);
     c.draft = true;
     c.sel = x.range;
     c.anchor = anchorOf(s, x.range, ix);                    // sent with the first comment
@@ -971,17 +972,19 @@
     if (s.pins) openBig(c); else c.ta.focus({ preventScroll: true });
   }
 
-  // a draft the user left without sending is gone
-  function dropDraft() {
-    var c = draft;
-    if (!c || c.busy) return;
-    draft = null;
+  // a draft stays until it is sent or its "delete" is pressed, also with nothing written (one talks to the voice input
+  // while looking elsewhere on the page)
+  function dropDraft(c) {
+    var i = drafts.indexOf(c);
+    if (i < 0 || c.busy) return;
+    drafts.splice(i, 1);
     if (big && big.c === c) closeBig(true);
     if (openNow === c) openNow = null;
     [c.el, c.pin].forEach(function (x) { if (x.parentNode) x.parentNode.removeChild(x); });
     if (io) io.unobserve(c.el);
     byThread.delete(c.el);
     paintMarks();
+    relayout();
   }
 
   function sendCard(c, ta) {
@@ -996,13 +999,13 @@
     c.send.disabled = true;
     if (big) big.send.disabled = true;
     // a draft is made on the server here, with where its text is
-    post('user', { page: page, id: c.id, title: c.title, comment: text, anchor: c === draft ? c.anchor : undefined })
+    post('user', { page: page, id: c.id, title: c.title, comment: text, anchor: c.draft ? c.anchor : undefined })
       .then(function (d) {
         c.ta.value = '';
         if (big && big.c === c) big.ta.value = '';
         keepDraft(c);
-        if (c === draft) {
-          draft = null;
+        if (c.draft) {
+          drafts.splice(drafts.indexOf(c), 1);
           c.draft = false;
           cards[c.id] = c;
           c.draftKey = 'talk-draft:' + page + ':' + c.id;
@@ -1067,7 +1070,7 @@
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); sendCard(c, b.ta); }
     });
     b.ta.addEventListener('input', function () { c.ta.value = b.ta.value; keepDraft(c); });
-    b.res.addEventListener('click', function () { resolveCard(c); });
+    b.res.addEventListener('click', function () { if (c.draft) dropDraft(c); else resolveCard(c); });
     b.box = box;
     big = b;
     document.body.appendChild(m);
@@ -1088,8 +1091,7 @@
       big.shown = it.thread.length;
       big.list.scrollTop = big.list.scrollHeight;
     }
-    big.res.hidden = !!c.draft;
-    big.res.textContent = tr(c.resolved ? 'restore' : 'resolve');
+    big.res.textContent = tr(c.draft ? 'delete' : c.resolved ? 'restore' : 'resolve');
   }
 
   // the whole thread grows with the report's zoom like the cards (the dark background around it stays as it is);
@@ -1108,7 +1110,7 @@
     var c = big.c;
     big.el.parentNode.removeChild(big.el);
     big = null;
-    if (!quiet && c.scope.pins) closeCard(c);         // no card to go back to; a draft is dropped
+    if (!quiet && c.scope.pins) closeCard(c);         // no card to go back to; a draft stays as its number
   }
 
   // a jump from the dock
@@ -1136,7 +1138,7 @@
   function paintMarks() {
     if (!marks) return;
     var plain = [], near = [], strong = [], done = [];
-    cardList().concat(draft ? [draft] : []).forEach(function (c) {
+    cardList().concat(drafts).forEach(function (c) {
       if (!c.range || c.near === 'block') return;            // a card only near its old place marks no text
       if (c.resolved) { if (showResolved) done.push(c.range); return; }
       (c.open ? strong : c.near ? near : plain).push(c.range);
@@ -1167,7 +1169,7 @@
     if (big) zoomBig();
     scopes.forEach(function (s) {
       var all = cardList().filter(function (c) { return c.scope === s; });
-      if (draft && draft.scope === s) all.push(draft);
+      drafts.forEach(function (d) { if (d.scope === s) all.push(d); });
       if (s.dirty) {
         s.ix = null;
         s.dirty = false;
@@ -1278,16 +1280,15 @@
     if (hit.scope.pins) openBig(hit); else openCard(hit);
   }
 
-  // elsewhere: the open card closes, a draft is dropped
+  // elsewhere: the open card closes (a draft stays)
   function onDown(e) {
     if (e.target.closest && e.target.closest('.talk-rcard, .talk-pin, .talk-modal, .talk-selbtn')) return;
-    if (draft) dropDraft(); else if (openNow) closeCard(openNow);
+    if (openNow) closeCard(openNow);
   }
 
   function onKey(e) {
     if (e.key !== 'Escape' || e.isComposing) return;
     if (big) closeBig();
-    else if (draft) dropDraft();
     else if (openNow) closeCard(openNow);
   }
 
