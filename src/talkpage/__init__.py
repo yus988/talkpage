@@ -482,6 +482,26 @@ def check_status(status):
     return status.strip()
 
 
+def check_anchor(anchor):
+    """Where a comment on selected text was, to put its card near there once the text has changed:
+    {heads: [the texts of its headings, outer first], id: the closest element id, pos: 0-1 of the way down}. Unknown
+    keys and invalid values are dropped; None when nothing valid is left."""
+    if anchor is None:
+        return None
+    if not isinstance(anchor, dict):
+        raise ValueError('anchor: an object {heads, id, pos}')
+    out = {}
+    heads = anchor.get('heads')
+    if isinstance(heads, list):
+        out['heads'] = [h.strip()[:120] for h in heads[:6] if isinstance(h, str) and h.strip()]
+    if isinstance(anchor.get('id'), str) and ID_RE.match(anchor['id']):
+        out['id'] = anchor['id']
+    pos = anchor.get('pos')
+    if isinstance(pos, (int, float)) and not isinstance(pos, bool) and 0 <= pos <= 1:
+        out['pos'] = round(float(pos), 3)
+    return out or None
+
+
 def waiting(it):
     return it.get('user_rev', 0) > it.get('agent_rev', 0)
 
@@ -564,21 +584,29 @@ class Store:
             it = self.data['items'][iid] = {'status': '', 'thread': [], 'user_rev': 0, 'agent_rev': 0, 'seen_rev': 0}
         return it
 
-    def user(self, iid, title=None, status=None, comment=None, notify=True):
+    def user(self, iid, title=None, status=None, comment=None, notify=True, anchor=None):
+        """A status and / or a comment from the user. A title or an anchor alone (where a comment on selected text
+        was) is kept without waking the agent."""
         it = self.item(iid, create=True)
         status = check_status(status)
+        anchor = check_anchor(anchor)
         comment = (comment or '').strip() if isinstance(comment, str) else ''
         title = str(title).strip()[:200] if title else ''
         changed = status is not None and status != it['status']
         if not changed and not comment:
-            if title and title != it.get('title'):
-                it['title'] = title
+            if title and title != it.get('title') or anchor and anchor != it.get('anchor'):
+                if title:
+                    it['title'] = title
+                if anchor:
+                    it['anchor'] = anchor
                 self._next()
                 self.save()
             return it
         rev = self._next()
         if title:
             it['title'] = title
+        if anchor:
+            it['anchor'] = anchor
         if changed:
             it['status'] = status
             it['thread'].append({'who': 'user', 'status': status, 'time': stamp(), 'rev': rev})
@@ -1014,7 +1042,7 @@ class Talk:
             if path == '/_talk/api/user':
                 s = self.store(body.get('page'))
                 it = s.user(body.get('id'), body.get('title'), body.get('status'), body.get('comment'),
-                            body.get('notify', True) is not False)
+                            body.get('notify', True) is not False, body.get('anchor'))
                 if it['user_rev'] == s.data['rev']:
                     self.last_user_at = time.time()
             elif path == '/_talk/api/seen':

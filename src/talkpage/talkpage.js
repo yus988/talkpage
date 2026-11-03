@@ -53,6 +53,7 @@
       'expand': 'Show the whole thread',
       'close': 'Close',
       'lost': 'Comments not found in the text',
+      'moved': 'The text has changed: shown near its old place (it was “{q}”)',
       'dock.resolved': 'Resolved {n}',
       'dock.resolved.title': 'Show or hide the resolved comments',
       'sb.toggle': 'Show or hide the sidebar',
@@ -112,6 +113,7 @@
       'expand': 'やりとりの全文表示',
       'close': '閉じる',
       'lost': '本文で見つからないコメント',
+      'moved': '本文が変わったため、近い場所に表示（元の文：「{q}」）',
       'dock.resolved': '解決済み {n}',
       'dock.resolved.title': '解決済みのコメントの表示の切り替え',
       'sb.toggle': 'サイドバーの表示の切り替え',
@@ -530,6 +532,9 @@
   }
 
   // ---------------------------------------------------------------- reports: comments on selected text
+  // A card sits beside its text, found again by the item's title. When the text has changed (a new round, an edit),
+  // the card goes near its old place, by most of the text or by the item's anchor (its headings, the element with an
+  // id, its share of the way down); only a comment with nothing to go by is listed at the end of the report.
   // talkpage's own parts: their text is not the report's, and a selection in them is not a comment
   var OURS = '.talk-ui, .talk-bar, .talk-thread, .talk-dock, .talk-copy-btn, .talk-copied';
   var SKIP = OURS + ', script, style, noscript, textarea, template';
@@ -573,16 +578,143 @@
     return { flat: flat.join(''), at: at };
   }
 
+  // characters a … z-1 of the index as a Range
+  function span(ix, a, z) {
+    var s = ix.at[a], e = ix.at[z - 1], r = document.createRange();
+    r.setStart(s[0], s[1]);
+    r.setEnd(e[0], e[1] + 1);
+    return r;
+  }
+  function blockRange(e) { var r = document.createRange(); r.selectNode(e); return r; }
+
   // the first place of the text in the index, white space aside; null when it is not there
   function find(ix, text) {
     var needle = text.replace(/\s+/g, '');
     var i = needle ? ix.flat.indexOf(needle) : -1;
-    if (i < 0) return null;
-    var a = ix.at[i], b = ix.at[i + needle.length - 1];
-    var r = document.createRange();
-    r.setStart(a[0], a[1]);
-    r.setEnd(b[0], b[1] + 1);
-    return r;
+    return i < 0 ? null : span(ix, i, i + needle.length);
+  }
+
+  // the first character of the index at or after the start of a range (the index is in document order)
+  function startOf(ix, range) {
+    var lo = 0, hi = ix.at.length;
+    while (lo < hi) {
+      var mid = (lo + hi) >> 1, c;
+      try { c = range.comparePoint(ix.at[mid][0], ix.at[mid][1]); } catch (e) { return -1; }
+      if (c < 0) lo = mid + 1; else hi = mid;
+    }
+    return lo < ix.at.length ? lo : -1;
+  }
+
+  // the report's headings that place a comment (h1 is the page's title)
+  function headings(root) {
+    return [].filter.call(root.querySelectorAll('h2, h3, h4, h5, h6'), function (h) { return !ours(h); });
+  }
+  // a heading's text without its number (2. / 4-1 / S3 / ③) and white space, so a renumbered heading still matches
+  function bare(t) {
+    return squash(t).replace(/^(?:[A-Z]{0,2}\d+(?:[-.．]\d+)*[.．]?|[①-⑳])[\s　]*/, '').replace(/[\s　]/g, '');
+  }
+
+  // where a comment's text is, kept with its item (the field anchor) to place the card once the text has changed: the
+  // headings it is under (outer first), the closest element with an id, and its share of the way down the text. A tool
+  // that carries comments to a new round of a report can write the same
+  function anchorOf(s, range, ix) {
+    var start = range.startContainer, stack = [];
+    headings(s.root).forEach(function (h) {
+      if (!(h === start || h.compareDocumentPosition(start) & Node.DOCUMENT_POSITION_FOLLOWING)) return;
+      var lv = +h.tagName[1];
+      while (stack.length && stack[stack.length - 1].lv >= lv) stack.pop();
+      stack.push({ lv: lv, t: squash(h.textContent).slice(0, 120) });
+    });
+    var a = { heads: stack.map(function (h) { return h.t; }).filter(Boolean) };
+    var e = start.nodeType === 1 ? start : start.parentElement, idEl = e && e.closest('[id]');
+    if (idEl && idEl.id && idEl !== s.root && s.root.contains(idEl) && !ours(idEl)) a.id = idEl.id;
+    var at = startOf(ix, range);
+    if (at >= 0 && ix.flat.length) a.pos = Math.round(at / ix.flat.length * 1000) / 1000;
+    return a;
+  }
+
+  // most of the text still there: pieces of it vote for where it starts, and the place with the most votes wins
+  function nearQuote(ix, needle) {
+    var text = ix.flat, L = Math.max(4, Math.min(10, Math.floor(needle.length / 3))), step = Math.max(2, L >> 1);
+    var votes = [], n = 0;
+    for (var i = 0; i + L <= needle.length; i += step) {
+      var piece = needle.slice(i, i + L), hits = [], at = text.indexOf(piece);
+      while (at >= 0 && hits.length < 4) { hits.push(at); at = text.indexOf(piece, at + 1); }
+      n++;
+      if (!hits.length || hits.length > 3) continue;       // gone, or too common to tell
+      hits.forEach(function (h) { votes.push({ s: h - i, h: h, w: 1 / hits.length }); });
+    }
+    var best = null;
+    votes.forEach(function (v) {
+      var near = votes.filter(function (x) { return Math.abs(x.s - v.s) <= 30; });
+      var w = near.reduce(function (t, x) { return t + x.w; }, 0);
+      if (!best || w > best.w) best = { w: w, near: near };
+    });
+    if (!best || best.w < Math.max(2, n * 0.34)) return null;
+    var hs = best.near.map(function (x) { return x.h; });
+    return { a: Math.min.apply(null, hs), z: Math.max.apply(null, hs) + L };
+  }
+
+  // the Range of a comment's text and how near it is: near '' the text itself, 'text' most of it, 'block' only near
+  // its old place (its heading, the element with its id, its share of the way down). null: nothing to go by
+  function locate(s, ix, title, a) {
+    a = a && typeof a === 'object' ? a : {};
+    var text = ix.flat, len = text.length, needle = title.replace(/\s+/g, '');
+    var pos = typeof a.pos === 'number' ? a.pos : null, want = pos === null ? 0 : pos * len, at = -1;
+    if (!len || !needle) return null;
+    for (var k = text.indexOf(needle); k >= 0; k = text.indexOf(needle, k + 1)) {   // twice: the one nearer its old place
+      if (at < 0 || Math.abs(k - want) < Math.abs(at - want)) at = k;
+    }
+    if (at >= 0) return { range: span(ix, at, at + needle.length), near: '' };
+    var heads = (Array.isArray(a.heads) ? a.heads : []).map(function (h) { return bare(String(h)); }).filter(Boolean);
+    var all = headings(s.root);
+    function headOf(hs, w) {                              // the heading with this text, or one that has it in it
+      return hs.filter(function (h) { return bare(h.textContent) === w; })[0] || (w.length >= 6 && hs.filter(function (h) {
+        var b = bare(h.textContent);
+        return b.length >= 6 && (b.indexOf(w) >= 0 || w.indexOf(b) >= 0);
+      })[0]) || null;
+    }
+    var e = typeof a.id === 'string' && a.id ? document.getElementById(a.id) : null;
+    if (e && (e === s.root || !s.root.contains(e) || ours(e))) e = null;
+    // an id such as F1 goes to another item when the items are renumbered: when its element has headings of its own,
+    // one of them must still match
+    if (e && heads.length) {
+      var own = all.filter(function (h) { return e.contains(h); });
+      if (own.length && !heads.some(function (w) { return headOf(own, w); })) e = null;
+    }
+    // most of the text, but only where it was: in the element with the id, or about as far down
+    var q = nearQuote(ix, needle);
+    if (q && (e ? e.contains(ix.at[q.a][0]) : pos === null || Math.abs(q.a / len - pos) < 0.15)) {
+      return { range: span(ix, q.a, q.z), near: 'text' };
+    }
+    // its heading, innermost first (inside the element with the id when there is one: a section's own heading is
+    // nearer than the section), then that element, then the same share of the way down
+    var hs = e ? all.filter(function (h) { return e.contains(h); }) : all;
+    for (var i = heads.length - 1; i >= 0; i--) {
+      var h = headOf(hs, heads[i]);
+      if (h) return { range: blockRange(h), near: 'block' };
+    }
+    if (e) return { range: blockRange(e), near: 'block' };
+    if (pos === null) return null;
+    var p = Math.min(len - 1, Math.max(0, Math.floor(pos * len)));
+    return { range: span(ix, p, p + 1), near: 'block' };
+  }
+
+  // where a card goes: a draft by its selection, else its text found again, else near its old place (≈ before its id)
+  function place(s, c) {
+    if (c.sel) { c.range = c.sel; c.near = ''; return; }
+    var ix = s.ix || (s.ix = index(s.root)), it = items[c.id] || {};
+    var p = locate(s, ix, c.title, it.anchor);
+    c.range = p ? p.range : null;
+    c.near = p ? p.near : '';
+    c.idEl.textContent = c.pin.textContent = (c.near ? '≈' : '') + c.id;
+    c.el.classList.toggle('talk-rcard-moved', !!c.near);
+    c.el.title = c.near ? tr('moved', { q: c.title }) : '';
+    // a comment from before anchors were kept: note where its text is while it is still there, for a later change
+    if (p && !p.near && items[c.id] && !it.anchor && !c.anchoring) {
+      c.anchoring = true;
+      post('user', { page: page, id: c.id, anchor: anchorOf(s, c.range, ix), notify: false }).then(take).catch(function () {});
+    }
   }
 
   // the report's own text in a range (without talkpage's parts)
@@ -744,13 +876,14 @@
   function newDraft(x) {
     dropDraft();
     if (openNow) closeCard(openNow);
-    var s = x.scope;
+    var s = x.scope, ix = index(s.root);
     var title = squash(x.text).slice(0, 200).trim();
-    if (!find(index(s.root), title)) title = rangeText(s.root, x.range).slice(0, 200).trim();
+    if (!find(ix, title)) title = rangeText(s.root, x.range).slice(0, 200).trim();
     if (!title) return;
     var c = draft = makeCard(nextId(s.prefix), s, title, true);
     c.draft = true;
     c.sel = x.range;
+    c.anchor = anchorOf(s, x.range, ix);                    // sent with the first comment
     selBtn.hidden = true;
     getSelection().removeAllRanges();
     renderCard(c);
@@ -780,7 +913,8 @@
     c.busy = true;
     c.send.disabled = true;
     if (big) big.send.disabled = true;
-    post('user', { page: page, id: c.id, title: c.title, comment: text })   // a draft is made on the server here
+    // a draft is made on the server here, with where its text is
+    post('user', { page: page, id: c.id, title: c.title, comment: text, anchor: c === draft ? c.anchor : undefined })
       .then(function (d) {
         c.ta.value = '';
         if (big && big.c === c) big.ta.value = '';
@@ -822,7 +956,7 @@
     box.setAttribute('role', 'dialog');
     box.setAttribute('aria-modal', 'true');
     var head = el('div', 'talk-modal-head');
-    head.appendChild(el('span', 'talk-rcard-id', c.id));
+    head.appendChild(el('span', 'talk-rcard-id', c.idEl.textContent));     // with ≈ when near its old place
     var x = button('talk-modal-close', '×');
     x.title = tr('close');
     x.setAttribute('aria-label', tr('close'));
@@ -907,13 +1041,14 @@
 
   function paintMarks() {
     if (!marks) return;
-    var plain = [], strong = [], done = [];
+    var plain = [], near = [], strong = [], done = [];
     cardList().concat(draft ? [draft] : []).forEach(function (c) {
-      if (!c.range) return;
+      if (!c.range || c.near === 'block') return;            // a card only near its old place marks no text
       if (c.resolved) { if (showResolved) done.push(c.range); return; }
-      (c.open ? strong : plain).push(c.range);
+      (c.open ? strong : c.near ? near : plain).push(c.range);
     });
     setMarks('talk-mark', plain, 0);
+    setMarks('talk-mark-near', near, 0);
     setMarks('talk-mark-done', done, 1);
     setMarks('talk-mark-open', strong, 2);
   }
@@ -938,9 +1073,7 @@
         s.dirty = false;
         all.forEach(function (c) { c.range = undefined; });
       }
-      all.forEach(function (c) {
-        if (c.range === undefined) c.range = c.sel || find(s.ix || (s.ix = index(s.root)), c.title);
-      });
+      all.forEach(function (c) { if (c.range === undefined) place(s, c); });
       var sr = s.root.getBoundingClientRect();
       var margin = vw - sr.right;
       s.pins = margin < MARGIN_MIN;
@@ -1028,7 +1161,7 @@
     var p = caretAt(e.clientX, e.clientY);
     if (!p) return;
     var hit = cardList().filter(function (c) {
-      if (!c.range || c.resolved && !showResolved) return false;
+      if (!c.range || c.near === 'block' || c.resolved && !showResolved) return false;
       try { return c.range.isPointInRange(p[0], p[1]); } catch (x) { return false; }
     })[0];
     if (!hit) return;

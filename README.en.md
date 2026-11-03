@@ -250,7 +250,13 @@ sidebar marks starred rows with ★; under `--place` it groups the reports by he
   the finger rests); it opens a card in the right margin, and the item (`C1`, `C2`, …, titled with the selected text)
   is made by the first send. Leaving without sending (a click elsewhere, Esc) drops it
 - The commented text gets a yellow highlight (darker for the open card; CSS Custom Highlight API); clicking it opens
-  the card. Comments whose text is no longer in the page are listed at the end
+  the card
+- When the text has changed (a new round, an edit) and is not found, the card goes near its old place (≈ before its
+  id, the old text in up to two lines): where most of the text still is (dotted underline), else its heading (also
+  when renumbered; inside the element with its id if there is one), else the element with its id (an id that moved to
+  another item when the items were renumbered is skipped unless a heading inside it still matches), else the same
+  share of the way down. The hints are kept in the item's `anchor` (for a new comment at its first send, for an older
+  one once its text is found). Only comments with nothing to go by are listed at the end
 - A closed card shows the agent's summary (`reply --summary`, up to 3 lines) or the first line of the last message.
   The frame of an open card, or ⤢, shows the whole thread in the middle of the screen (background or Esc closes it).
   With less than 240 px of right margin, only numbers are shown at the right edge
@@ -313,6 +319,9 @@ the next time it is read; deleting the file starts the page over, even while the
 - `user_rev`: the revision of the user's last action the agent is told about; `agent_rev`: of the agent's last reply
   or ack. While `user_rev > agent_rev` the item is "Unread by agent"
 - `seen_rev`: the revision of the agent's last message the user has read
+- `anchor` (a comment on selected text): `{"heads": [the headings above the text, outer first], "id": the closest
+  element with an id, "pos": its share of the way down the text, 0-1}`. It places the card near its old place once
+  the text has changed; a tool that carries comments to a new round can write the same
 - Other keys (an item's `fields`, your own top-level keys) are kept as they are
 
 ## HTTP API
@@ -327,7 +336,7 @@ send `Origin: http://127.0.0.1:<port>` (see "Safety").
 | `GET /_talk/api/reports` | Under `--reports` only: `{root, url, places, rows: [{page, theme, round, title, owner, owner_id, tracked, status, read, comments, time, lang, place, group, star, tags, hidden}]}`, newest first |
 | `POST /_talk/api/mark` `{page, star?, tags?, hidden?}` | Under `--reports` only: the star (`true` / `false`), the tags (a list of strings; `[]` removes them) and hidden (`true` / `false`) of the list; what is left out stays |
 | `GET /_talk/api/pending[?page=P]` | Items unread by the agent and each one's new user actions (`new`). `wait` uses `&wait=50&listen=1` (shows "listening" meanwhile; what it printed is not printed again) and `&take=1` |
-| `POST /_talk/api/user` `{page, id, title?, status?, comment?, notify?}` | A user action (sent by the page). `status: ""` clears; `notify: false` does not wake the agent |
+| `POST /_talk/api/user` `{page, id, title?, status?, comment?, notify?, anchor?}` | A user action (sent by the page). `status: ""` clears; `notify: false` does not wake the agent; a `title` or an `anchor` alone is kept without waking it |
 | `POST /_talk/api/seen` `{page, id}` | The user read the agent's message |
 | `POST /_talk/api/agent` `{page, id, reply?, status?, fields?}` | The agent's reply (creates the item if needed). Clears "unread" |
 | `POST /_talk/api/ack` `{page?, ids?}` | Clears "unread" without a reply (without `ids`: the whole page; without `page`: all pages) |

@@ -102,6 +102,8 @@ body { padding-bottom: 64px; }
 ::highlight(talk-mark) { background-color: rgba(255, 214, 0, .35); }
 ::highlight(talk-mark-done) { background-color: rgba(128, 128, 128, .2); }
 ::highlight(talk-mark-open) { background-color: rgba(255, 190, 0, .75); }
+/* the text has changed and most of it is still there: a dotted line instead of the yellow */
+::highlight(talk-mark-near) { text-decoration: underline dotted rgba(200, 140, 0, .9); text-decoration-thickness: 2px; }
 .talk-layer { position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 950; }
 .talk-selbtn {
   position: absolute; white-space: nowrap; font: 13px/1.5 system-ui, sans-serif; color: #fff; background: var(--talk-accent);
@@ -119,6 +121,9 @@ body { padding-bottom: 64px; }
 .talk-rcard-id { font-weight: 700; color: var(--talk-accent); }
 .talk-rcard .talk-mark { min-width: 0; }
 .talk-rcard-quote { display: none; color: var(--talk-muted); font-size: 12px; border-left: 3px solid rgba(255, 190, 0, .8); padding-left: 6px; margin: 2px 0; }
+/* a card only near its old place (≈ before the id): the text it was about, in two lines at most */
+.talk-rcard-moved .talk-rcard-id { color: var(--talk-muted); }
+.talk-rcard-moved .talk-rcard-quote { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
 .talk-rcard-sum { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; overflow-wrap: anywhere; }
 .talk-rcard-sum.talk-rcard-summary { -webkit-line-clamp: 3; }
 .talk-rcard-sum:empty { display: none; }

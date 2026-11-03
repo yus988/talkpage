@@ -180,7 +180,8 @@ talkpage serve --reports --place "sdk-workspace:notes=C:/ws-a/dev-notes" --place
 **画面**
 
 - 本文の文字を選ぶと「コメント」のボタンが出る（スマホでは長押しで選び、範囲を決めて指を止めると、選んだ所の下に出る）。押すと右の余白にカードが開き、最初に送った時にその項目（`C1`・`C2`…。題は選んだ文字）ができる。送らずに離れる（ほかの所を押す・Esc）と消える
-- コメントを付けた文字に黄色の印（開いているカードの印は濃く。CSS Custom Highlight API）。印を押すとカードが開く。本文から文字が消えたコメントは、末尾の「本文で見つからないコメント」に並ぶ
+- コメントを付けた文字に黄色の印（開いているカードの印は濃く。CSS Custom Highlight API）。印を押すとカードが開く
+- 本文が変わって（新しい回・手直し）文字が見つからないコメントは、元の場所の近くに出す（カードの番号の前に ≈、元の文を 2 行まで）。順に、文字の大半が残る所（点線の印）、見出し（番号が変わっても合う。id の付いた要素の中にあれば、その中の見出し）、id の付いた要素（番号の付け替えで別の項目に移った id は、中の見出しが合わなければ使わない）、本文の上からの割合。場所の手がかりは項目の `anchor` に残す（新しいコメントは最初に送った時に、前からあるコメントは文字が見つかった時に）。何も手がかりの無いコメントだけ、末尾の「本文で見つからないコメント」に並ぶ
 - 閉じたカードには、エージェントの要約（`reply --summary`。3 行まで）か最後の発言の 1 行目が出る。開いたカードの枠か ⤢ で、やりとりの全文を画面の中央に出す（背景か Esc で戻る）。右の余白が 240 px 未満のときは、右端に番号だけを並べる
 - 「解決」でカードと印を隠す（エージェントは起こさない）。dock の「解決済み n」で薄く出し、「戻す」で元に戻す
 - 後から届いた返事で閉じたカードを開かない。「新しい返信」の印と、タブの名前の先頭の `(n)` で知らせる
@@ -227,6 +228,7 @@ talkpage serve --reports --place "sdk-workspace:notes=C:/ws-a/dev-notes" --place
 - `thread`: 状態の変更（`status`。`""` は解除）とコメント（`text`）を、ユーザー（`user`）とエージェント（`agent`）の両方について時刻順に残す
 - `user_rev`: エージェントに知らせるユーザーの最後の操作の版、`agent_rev`: エージェントの最後の返信・ack の版。`user_rev > agent_rev` の間、その項目は「エージェント未読」
 - `seen_rev`: ユーザーが読んだエージェントの最後のメッセージの版
+- `anchor`（文字を選んで付けたコメント）: `{"heads": [その文字の上の見出し（外側から）], "id": 一番近い id の付いた要素, "pos": 本文の上からの割合 0〜1}`。本文が変わったとき、カードを元の場所の近くに出す手がかり。新しい回へコメントを引き継ぐツールも同じ形で書ける
 - ほかのキー（項目の `fields`、ファイルの最上位の独自のキー）はそのまま残す
 
 ## HTTP API
@@ -240,7 +242,7 @@ talkpage serve --reports --place "sdk-workspace:notes=C:/ws-a/dev-notes" --place
 | `GET /_talk/api/reports` | `--reports` のときだけ。レポートの一覧 `{root, url, places, rows: [{page, theme, round, title, owner, owner_id, tracked, status, read, comments, time, lang, place, group, star, tags, hidden}]}`（新しい順） |
 | `POST /_talk/api/mark` `{page, star?, tags?, hidden?}` | `--reports` のときだけ。一覧のスター（`true` / `false`）、タグ（文字列の配列。`[]` で外す）、非表示（`true` / `false`）。省いたものはそのまま |
 | `GET /_talk/api/pending[?page=P]` | エージェント未読の項目と、各項目の新しいユーザーの操作（`new`）。`wait` の内部で `&wait=50&listen=1`（待っている間は「受付中」、出したものは再び出さない）と `&take=1` を使う |
-| `POST /_talk/api/user` `{page, id, title?, status?, comment?, notify?}` | ユーザーの操作（ページが送る）。`status: ""` で解除、`notify: false` でエージェントを起こさない |
+| `POST /_talk/api/user` `{page, id, title?, status?, comment?, notify?, anchor?}` | ユーザーの操作（ページが送る）。`status: ""` で解除、`notify: false` でエージェントを起こさない。`title` か `anchor` だけなら残すだけで、エージェントを起こさない |
 | `POST /_talk/api/seen` `{page, id}` | ユーザーがエージェントのメッセージを読んだ |
 | `POST /_talk/api/agent` `{page, id, reply?, status?, fields?}` | エージェントの返信（項目が無ければ作る）。未読を消す |
 | `POST /_talk/api/ack` `{page?, ids?}` | 未読を返信なしで消す（`ids` を省くとそのページの全部、`page` も省くと全ページ） |

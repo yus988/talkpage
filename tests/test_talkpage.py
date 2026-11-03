@@ -63,6 +63,19 @@ class StoreTest(unittest.TestCase):
             self.s.user('', status='OK')
         self.assertEqual(self.s.user('net:/Power In/Net-(U6-EN)', status='OK')['status'], 'OK')
 
+    def test_anchor(self):
+        self.s.user('C1', 'quote', comment='c', anchor={'heads': ['2. A', ' ', 3], 'id': 'H1', 'pos': 0.4567, 'x': 1})
+        it = self.s.data['items']['C1']
+        self.assertEqual(it['anchor'], {'heads': ['2. A'], 'id': 'H1', 'pos': 0.457})
+        rev, user_rev = self.s.data['rev'], it['user_rev']
+        self.s.user('C1', 'quote', anchor={'pos': 0.5}, notify=False)       # an anchor alone: kept, nobody is woken
+        self.assertEqual((it['anchor'], self.s.data['rev'], it['user_rev']), ({'pos': 0.5}, rev + 1, user_rev))
+        self.s.user('C1', 'quote', anchor={'pos': 2, 'id': 'bad\nid', 'heads': 'x'})     # nothing valid: unchanged
+        self.assertEqual((it['anchor'], self.s.data['rev']), ({'pos': 0.5}, rev + 1))
+        self.assertEqual(tp.Store(self.s.path, 'p.html').data['items']['C1']['anchor'], {'pos': 0.5})
+        with self.assertRaises(ValueError):
+            self.s.user('C1', anchor='top')
+
     def test_deleted_file_starts_over(self):
         self.s.user('C1', status='NG')
         rev = self.s.data['rev']
@@ -241,6 +254,22 @@ class HttpTest(unittest.TestCase):
         self.assertIn('A1, A2', a.stdout)
         self.assertEqual(self.req('/_talk/api/pending')[1]['items'], [])
         self.assertIn('[NG]', self.cli('show', '--page', 'r1').stdout)
+
+    def test_4_anchor(self):
+        page = 'notes/r1/index.html'
+        anchor = {'heads': ['2. Background', '2.1 Before'], 'id': 'background', 'pos': 0.25}
+        code, it = self.req('/_talk/api/user', {'page': page, 'id': 'C1', 'title': 'some text', 'comment': 'why?',
+                                                'anchor': anchor})
+        self.assertEqual((code, it['anchor']), (200, anchor))
+        # the page notes where an older comment is, quietly: kept, the agent is not woken
+        code, it = self.req('/_talk/api/user', {'page': page, 'id': 'C2', 'title': 'other', 'anchor': {'pos': 0.5},
+                                                'notify': False})
+        self.assertEqual((code, it['anchor'], tp.waiting(it)), (200, {'pos': 0.5}, False))
+        self.assertEqual(self.req('/_talk/api/user', {'page': page, 'id': 'C1', 'anchor': 'top'})[0], 400)
+        with open(os.path.join(self.root, 'notes', 'r1', 'index.talk.json'), encoding='utf-8') as f:
+            items = json.load(f)['items']
+        self.assertEqual((items['C1']['anchor'], items['C2']['anchor']), (anchor, {'pos': 0.5}))
+        self.assertIn('C1', self.cli('ack', '--page', 'r1').stdout)
 
 
 def write(root, path, text):
