@@ -324,7 +324,7 @@ send `Origin: http://127.0.0.1:<port>` (see "Safety").
 |---|---|
 | `GET /_talk/api/info` | root (under `--place`: `places: [{id, group, root}]`), port, the agent's state (`listening` / `working` / `absent`), pages with a state, `name`, `url` (where the user reads; the tailnet address with `--tailscale`), `local_url` (this PC's own address), `open` (pages that asked `state` with `open=1` in the last 90 s, i.e. open in a browser tab) |
 | `GET /_talk/api/state?page=P` | All items of a page. With `&rev=N&wait=25` (and `&presence=…`) it waits up to that many seconds for the revision (or the agent's state) to change. `&open=1` counts the page as open |
-| `GET /_talk/api/reports` | Under `--reports` only: `{root, url, places, rows: [{page, theme, round, title, owner, tracked, status, read, comments, time, lang, place, group, star, tags, hidden}]}`, newest first |
+| `GET /_talk/api/reports` | Under `--reports` only: `{root, url, places, rows: [{page, theme, round, title, owner, owner_id, tracked, status, read, comments, time, lang, place, group, star, tags, hidden}]}`, newest first |
 | `POST /_talk/api/mark` `{page, star?, tags?, hidden?}` | Under `--reports` only: the star (`true` / `false`), the tags (a list of strings; `[]` removes them) and hidden (`true` / `false`) of the list; what is left out stays |
 | `GET /_talk/api/pending[?page=P]` | Items unread by the agent and each one's new user actions (`new`). `wait` uses `&wait=50&listen=1` (shows "listening" meanwhile; what it printed is not printed again) and `&take=1` |
 | `POST /_talk/api/user` `{page, id, title?, status?, comment?, notify?}` | A user action (sent by the page). `status: ""` clears; `notify: false` does not wake the agent |

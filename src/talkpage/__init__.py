@@ -822,10 +822,12 @@ class Talk:
                 read = s.data['items'].get('read', {}).get('status', '') if s else ''
                 comments = [x['id'] for x in s.waiting_items() if any('text' in m for m in x['new'])] if s else []
                 owner = owners.get(theme, {}).get('name', '')
+                owner_id = owners.get(theme, {}).get('id', '')
                 mk = marks.get(page, {})
                 tags = mk.get('tags') if isinstance(mk.get('tags'), list) else []
                 rows.append({'page': page, 'theme': theme, 'round': r, 'title': title or theme,
-                             'owner': owner if isinstance(owner, str) else '', 'tracked': bool(r),
+                             'owner': owner if isinstance(owner, str) else '',
+                             'owner_id': owner_id if isinstance(owner_id, str) else '', 'tracked': bool(r),
                              'status': read if r else '-', 'read': bool(r) and read in READ,
                              'comments': comments, 'time': t, 'lang': lang, 'place': pl.id, 'group': pl.group,
                              'star': mk.get('star') is True, 'tags': [x for x in tags if isinstance(x, str)],

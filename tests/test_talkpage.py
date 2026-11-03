@@ -519,7 +519,7 @@ class PlacesTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         with open(os.path.join(self.c, 'owners.json'), encoding='utf-8') as f:
             self.assertEqual(json.load(f), {'flyer': {'name': 'チラシ', 'id': 'sid-9'}})
-        self.assertEqual(self.rows()[self.R5]['owner'], 'チラシ')
+        self.assertEqual((self.rows()[self.R5]['owner'], self.rows()[self.R5]['owner_id']), ('チラシ', 'sid-9'))
         r = self.cli('reports', 'read', 'expo/flyer')
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.rows()[self.R5]['status'], '読んだ')
