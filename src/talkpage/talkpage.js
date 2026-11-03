@@ -2105,6 +2105,17 @@
     }, true);
   }
 
+  // a link in the page to another page opens in a new tab, so the page stays where it was read; a link within the page,
+  // one with its own target, and the sidebar's list (moving between reports) stay as they are
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('a[href]');
+    if (!a || e.defaultPrevented || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    if (editing || a.hasAttribute('target') || a.hasAttribute('download') || a.closest(OURS)) return;
+    if (!/^(https?|file):$/.test(a.protocol) || a.href.split('#')[0] === location.href.split('#')[0]) return;
+    a.target = '_blank';
+    a.rel = (a.rel ? a.rel + ' ' : '') + 'noopener';
+  });
+
   // <body data-talk-listing>: the server's list of reports (no page file, so no state): the sidebar and zoom only
   var LISTING = false;
   function start() {

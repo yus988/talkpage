@@ -306,6 +306,9 @@ sidebar marks starred rows with ★; under `--place` it groups the reports by he
   up or down for the height of the reports (a double click puts them back to half and half). 340 px wide at first.
   Folds, width (200–640 px), that height, open or closed and the zoom stay in this browser. Under 900 px wide it opens
   over the report (a tap outside closes it) and starts closed
+- A link in the page to another page opens in a new tab (the page stays where it was read). Links within the page
+  (`#…`), links with their own `target`, and the sidebar's list (moving between reports) work as before; a click with
+  Ctrl or another key held is left to the browser.
 - On a phone (under 700 px wide) the report keeps to the screen's width: grids made for a wide screen fall into one
   column, overflowing rows wrap, tables and code scroll inside their box. Zooming is the browser's pinch zoom; the
   report's zoom and "Fit width" are not shown, and after a pinch zoom a "100%" button at the top right brings the page
