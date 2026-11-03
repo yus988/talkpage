@@ -132,7 +132,7 @@ the page's CSS can change it).
 - "Edit" in the box at the bottom right fixes the text in place (shown only on a page with blocks of text to fix, and
   not on a page whose state is kept elsewhere by `data-talk-page`). It makes each block of text (a paragraph, a list
   item, a heading, a table cell …; not one that holds other blocks, nor one inside an item (`data-talk`), a copy box
-  (`data-copy`) or talkpage's own parts) take plain text: a dashed outline on hover, a solid one while you write
+  (`data-copy`) or talkpage's own parts) take plain text: each shows a dashed outline, a solid one on hover and a thicker one while you write
   (outlines: nothing moves). Enter or a click elsewhere saves the block, Esc puts it back (Enter while converting
   Japanese input only confirms). The result ("Saved", or why not) shows above the block's right end; a block that
   could not be saved keeps a red outline. While editing, selecting text shows no "Comment" and a click on a highlight
