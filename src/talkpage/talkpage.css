@@ -174,6 +174,20 @@ body { padding-bottom: 64px; }
 .talk-modal-quote { margin: 6px 0; padding: 2px 10px; color: var(--talk-muted); border-left: 3px solid rgba(255, 190, 0, .8); }
 .talk-modal-sum { margin: 6px 0; padding: 6px 10px; border: 1px dashed var(--talk-line); border-radius: 6px; white-space: pre-wrap; }
 
+/* Edit: the blocks that take text show a dashed outline on hover and a solid one while written in (outlines: nothing
+   moves); the note of saving above the block */
+[data-talk-edit] { outline: 1px dashed transparent; outline-offset: 2px; cursor: text; }
+.talk-editing [data-talk-edit]:not(:focus):hover { outline-color: var(--talk-muted); }
+[data-talk-edit]:focus { outline: 2px solid var(--talk-accent); }
+.talk-edit-ng:not(:focus), .talk-editing .talk-edit-ng:not(:focus):hover { outline: 2px solid var(--talk-ng); outline-offset: 2px; }
+.talk-dock .talk-edit-btn[aria-pressed="true"] { color: #fff; background: var(--talk-accent); border-color: var(--talk-accent); }
+.talk-edit-note {
+  position: absolute; padding: 1px 8px; font: 12px/1.6 system-ui, sans-serif; white-space: nowrap; color: #fff;
+  background: var(--talk-accent); border-radius: 4px; pointer-events: none;
+}
+.talk-edit-note.talk-edit-note-ng { background: var(--talk-ng); white-space: normal; width: max-content; max-width: 320px; }
+.talk-edit-note[hidden] { display: none; }
+
 /* the "read" item at the end of a report */
 .talk-readbox { margin: 32px 0 8px; padding: 10px 14px; background: var(--talk-bg); border: 1px solid var(--talk-line); border-radius: 8px; }
 .talk-readbox-title { font-weight: 600; }

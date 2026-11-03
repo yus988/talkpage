@@ -129,6 +129,20 @@ the page's CSS can change it).
   received, "not waiting", "Server offline"), "Done n / m" (items with a status / items that take one), "New
   replies n" and "Unread by agent n" (press to go to that item). With new replies the tab title starts with `(n)`
 - Replies show at once by long polling (a request that waits up to 25 s for a change, repeated)
+- "Edit" in the box at the bottom right fixes the text in place (shown only on a page with blocks of text to fix, and
+  not on a page whose state is kept elsewhere by `data-talk-page`). It makes each block of text (a paragraph, a list
+  item, a heading, a table cell …; not one that holds other blocks, nor one inside an item (`data-talk`), a copy box
+  (`data-copy`) or talkpage's own parts) take plain text: a dashed outline on hover, a solid one while you write
+  (outlines: nothing moves). Enter or a click elsewhere saves the block, Esc puts it back (Enter while converting
+  Japanese input only confirms). The result ("Saved", or why not) shows above the block's right end; a block that
+  could not be saved keeps a red outline. While editing, selecting text shows no "Comment" and a click on a highlight
+  opens no card
+- To save, the server finds the block in the page's file by its tag, its text (white space squashed), which one of
+  the same it is and how many of them there are, writes its new content and keeps the fix in the state's `edits`
+  (`show` prints `~ edit` lines); an agent that builds the page again reads them first and takes them into its source.
+  When the file does not hold what the page showed (rebuilt, or blocks added by the page's own script), or elements of
+  that tag have no end tag (`</li>` …), nothing is written and the reason is shown. After a save the comment cards
+  are placed again (a comment whose text changed goes near its old place, with ≈)
 
 **Declaring items in JSON**: put an array of items in a `<script type="application/json">` inside `data-talk-list`,
 or point `data-talk-list="items.json"` at a file (relative to the page); they are laid out as cards.
@@ -166,9 +180,10 @@ for a screen you draw yourself (marks on a drawing etc.) instead of `data-talk` 
    answer (so the agent is not woken by the same thing again); unanswered items are listed at the end of its output
    as `also waiting`
 
-`talkpage show [--page <page>]` prints every item's status and its latest messages (for summing up results). `--page`
-is a page path or a part of one that matches a single page (among the pages with a state, else among all pages under
-root; e.g. `r2`).
+`talkpage show [--page <page>]` prints every item's status and its latest messages (for summing up results), and at
+the end the user's fixes of the text with "Edit" as `~ edit <time> <tag>  <before>  ->  <after>` (take them into the
+page's source before building it again). `--page` is a page path or a part of one that matches a single page (among
+the pages with a state, else among all pages under root; e.g. `r2`).
 
 Example output of `wait`:
 
@@ -326,6 +341,8 @@ the next time it is read; deleting the file starts the page over, even while the
 - `anchor` (a comment on selected text): `{"heads": [the headings above the text, outer first], "id": the closest
   element with an id, "pos": its share of the way down the text, 0-1}`. It places the card near its old place once
   the text has changed; a tool that carries comments to a new round can write the same
+- `edits` (top level): the user's fixes of the text with "Edit", `[{"time", "tag", "before", "after"}]` (text with
+  white space squashed, up to 300 characters; the last 200)
 - Other keys (an item's `fields`, your own top-level keys) are kept as they are
 
 ## HTTP API
@@ -344,11 +361,12 @@ send `Origin: http://127.0.0.1:<port>` (see "Safety").
 | `POST /_talk/api/seen` `{page, id}` | The user read the agent's message |
 | `POST /_talk/api/agent` `{page, id, reply?, status?, fields?}` | The agent's reply (creates the item if needed). Clears "unread" |
 | `POST /_talk/api/ack` `{page?, ids?}` | Clears "unread" without a reply (without `ids`: the whole page; without `page`: all pages) |
+| `POST /_talk/api/edit` `{page, tag, text, nth, count?, html, after?}` | The user's fix of the text (sent by the page's "Edit"). Of the elements `tag` (`p`, `li`, `h1`–`h6`, `td`, `th`, `dt`, `dd`, `figcaption`, `caption`, `blockquote`) whose text (white space squashed) is `text`, the `nth` (from 0; none inside `data-talk`, `template` or `noscript` counted) gets the content `html` in the file, and the fix is kept in the state's `edits`. Nothing is written (400) when `count` (how many the page counted) differs from the file, when an element of that tag has no end tag, or when `html` holds scripts, embedding, `on…=` or `javascript:`. Does not wake the agent |
 | `GET /_talk/talkpage.js` `/_talk/talkpage.css` | The page side |
 
 `page` of agent, ack, state and pending may be a part of a path that matches a single page (among the pages with a
 state, else among all pages under root). The agent may write before the user (e.g. to fill in results). user and
-seen take the exact path only.
+seen (and edit) take the exact path only.
 
 ## Safety
 
@@ -373,8 +391,9 @@ seen take the exact path only.
   datasheets) into a page as text, not as HTML
 - Files are served from under root (under `--place`: each folder) only (`..`, names starting with `.`, and names with
   `\` or `:` are refused, as is a real path outside the folder through a link). A redirect goes only to our own path
-  made from the request's (never `//<host>`). The only files written are
-  the `.talk.json` beside pages that exist under root
+  made from the request's (never `//<host>`). The only files written are the `.talk.json` beside pages that exist
+  under root and, with "Edit", the HTML of that page. The new content cannot hold scripts, embedding (iframe …),
+  `on…=` or `javascript:` URLs, and another site cannot write it (the Origin checks above)
 - Messages are always inserted as text (only line breaks, `` `code` `` and http(s) links are formatted)
 
 ## Tests

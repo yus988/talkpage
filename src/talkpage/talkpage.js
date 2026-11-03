@@ -40,6 +40,11 @@
       'send.title': 'Send (Ctrl+Enter)',
       'thread.toggle': 'Show or hide the thread',
       'shrink': 'Back to the card',
+      'edit': 'Edit',
+      'edit.title': 'Fix the text in place: each block is saved when you leave it or press Enter; Esc puts it back',
+      'edit.saving': 'Saving…',
+      'edit.saved': 'Saved',
+      'edit.failed': 'Not saved: {msg}',
       'who.agent': 'Agent',
       'who.user': 'You',
       'cleared': 'cleared the status',
@@ -107,6 +112,11 @@
       'send.title': '送信（Ctrl+Enter）',
       'thread.toggle': 'やりとりの表示の切り替え',
       'shrink': 'カードに戻す',
+      'edit': '編集',
+      'edit.title': '本文をその場で書き換える（塊ごとに保存。Enter か、ほかの所を押すと保存、Esc で取り消し）',
+      'edit.saving': '保存中…',
+      'edit.saved': '保存しました',
+      'edit.failed': '保存できませんでした：{msg}',
       'who.agent': 'エージェント',
       'who.user': 'あなた',
       'cleared': '状態を解除',
@@ -373,7 +383,13 @@
     dock.resolved = button('talk-jump', '');
     dock.resolved.title = tr('dock.resolved.title');
     dock.resolved.setAttribute('aria-pressed', 'false');
-    [dock.unread, dock.waiting, dock.resolved, dock.progress, dock.presence].forEach(function (x) { d.appendChild(x); });
+    dock.edit = button('talk-jump talk-edit-btn', tr('edit'));      // only on a page with text to fix
+    dock.edit.title = tr('edit.title');
+    dock.edit.setAttribute('aria-pressed', 'false');
+    dock.edit.hidden = !FILE_PAGE || !editables().length;
+    dock.edit.addEventListener('click', function () { setEditing(!editing); });
+    [dock.unread, dock.waiting, dock.resolved, dock.edit, dock.progress, dock.presence]
+      .forEach(function (x) { d.appendChild(x); });
     dock.unread.addEventListener('click', function () { jump(function (u) { return u.unread; }, true); });
     dock.waiting.addEventListener('click', function () { jump(function (u) { return u.waiting; }, false); });
     dock.resolved.addEventListener('click', function () {
@@ -1166,10 +1182,10 @@
     relayout();
   }
 
-  // the "comment" button by a selection of the report's text
+  // the "comment" button by a selection of the report's text (while text is being written in, selecting is for writing)
   function onSelect() {
     var sel = getSelection(), s = null, r = null;
-    if (sel && sel.rangeCount && !sel.isCollapsed) {
+    if (sel && sel.rangeCount && !sel.isCollapsed && !editing && !editBlock(document.activeElement)) {
       r = sel.getRangeAt(0);
       s = scopeOf(r.commonAncestorContainer);
       if (s && (ours(r.commonAncestorContainer) || ours(r.startContainer) || ours(r.endContainer) ||
@@ -1198,7 +1214,7 @@
 
   // a click on marked text opens its card
   function onClick(e) {
-    if (e.button !== 0 || ours(e.target)) return;
+    if (e.button !== 0 || ours(e.target) || editing || editBlock(e.target)) return;   // a click to write in
     var sel = getSelection();
     if (sel && !sel.isCollapsed) return;
     var p = caretAt(e.clientX, e.clientY);
@@ -1306,9 +1322,11 @@
 
   // the report's own styles, mended in place. A rounded box with a stripe on one side: that side's corners square (the
   // stripe would bend along them like a fingernail). On a phone, a grid or a row of boxes made for a wide screen and
-  // wider than its place: one column, or wrapped
+  // wider than its place: one column, or wrapped. The style each had is kept (mended): the text written back by Edit
+  // is the page's own
   function mendReport() {
     var all = content.querySelectorAll('*'), narrow = phone();
+    function mend(e) { if (!mended.has(e)) mended.set(e, e.getAttribute('style')); return e.style; }
     for (var i = 0; i < all.length && i < 8000; i++) {
       var e = all[i];
       if (ours(e)) continue;
@@ -1317,12 +1335,12 @@
       [['Left', 'borderTopLeftRadius', 'borderBottomLeftRadius'], ['Right', 'borderTopRightRadius', 'borderBottomRightRadius']]
         .forEach(function (k) {
           var w = parseFloat(s['border' + k[0] + 'Width']) || 0;
-          if (w >= 3 && w > other * 2 && (parseFloat(s[k[1]]) || parseFloat(s[k[2]]))) e.style[k[1]] = e.style[k[2]] = '0';
+          if (w >= 3 && w > other * 2 && (parseFloat(s[k[1]]) || parseFloat(s[k[2]]))) mend(e)[k[1]] = mend(e)[k[2]] = '0';
         });
       if (!narrow || e.scrollWidth <= e.clientWidth + 1) continue;
-      if (d === 'grid' || d === 'inline-grid') e.style.gridTemplateColumns = 'minmax(0, 1fr)';
+      if (d === 'grid' || d === 'inline-grid') mend(e).gridTemplateColumns = 'minmax(0, 1fr)';
       else if ((d === 'flex' || d === 'inline-flex') && s.flexWrap === 'nowrap' && s.flexDirection.indexOf('row') === 0) {
-        e.style.flexWrap = 'wrap';
+        mend(e).flexWrap = 'wrap';
       }
     }
   }
@@ -1629,6 +1647,117 @@
         }, 30000);
       });
   }
+
+  // ---------------------------------------------------------------- Edit: the user fixes the page's text in place
+  // Edit in the dock makes each block of text (a paragraph, a list item, a heading, a table cell …) take plain text.
+  // Leaving a block (or Enter) saves it:
+  // /_talk/api/edit finds it in the page's file by its tag, its text and which one of the same it is, writes its new
+  // content and keeps the fix for the agent (show). Esc puts it back. A block that holds other blocks stays as it is.
+  var EDITABLE = 'p, li, h1, h2, h3, h4, h5, h6, td, th, dt, dd, figcaption, caption, blockquote';   // EDIT_TAGS of the server
+  var FILE_PAGE = !html.hasAttribute('data-talk-page');    // the state is beside the page's own file, which can be written
+  var editing = false, editOrig = new WeakMap(), editNote = null, mended = new WeakMap();
+
+  function canEdit(e) {
+    return !e.closest(OURS + ', [data-talk], [data-copy], svg') && !e.querySelector(EDITABLE) && !!squash(e.textContent);
+  }
+  function editables() { return [].filter.call(document.body.querySelectorAll(EDITABLE), canEdit); }
+  function editBlock(t) { return t && t.closest ? t.closest('[data-talk-edit]') : null; }
+  // which one of the blocks with its tag and its text it is, and how many there are, as the server counts them in the
+  // file (talkpage's own parts and the items' threads are not in the file)
+  function blockKey(b, text) {
+    var tag = b.tagName.toLowerCase(), n = 0, nth = -1;
+    document.body.querySelectorAll(tag).forEach(function (x) {
+      if (x.closest(OURS + ', [data-talk]') || squash(x.textContent) !== text) return;
+      if (x === b) nth = n;
+      n++;
+    });
+    return { tag: tag, nth: nth, count: n };
+  }
+  // the block's content as the page's file has it: without the styles mendReport() put on what is inside
+  function sourceHTML(b) {
+    var all = b.querySelectorAll('*');
+    if (![].some.call(all, function (e) { return mended.has(e); })) return b.innerHTML;
+    var copy = b.cloneNode(true), twins = copy.querySelectorAll('*');
+    [].forEach.call(all, function (e, i) {
+      if (!mended.has(e)) return;
+      var s = mended.get(e);
+      if (s == null) twins[i].removeAttribute('style'); else twins[i].setAttribute('style', s);
+    });
+    return copy.innerHTML;
+  }
+  function makeEditable(e) {
+    try { e.contentEditable = 'plaintext-only'; } catch (x) { e.contentEditable = 'true'; }
+    e.spellcheck = false;
+    e.setAttribute('data-talk-edit', '');
+  }
+  function unmakeEditable(e) { e.removeAttribute('contenteditable'); e.removeAttribute('data-talk-edit'); }
+
+  function setEditing(on) {
+    editing = on;
+    html.classList.toggle('talk-editing', on);
+    dock.edit.setAttribute('aria-pressed', String(on));
+    if (selBtn) selBtn.hidden = true;
+    editables().forEach(function (e) {
+      if (on) { makeEditable(e); return; }
+      if (e === document.activeElement) e.blur();          // saves it
+      unmakeEditable(e);
+    });
+  }
+
+  // "saving", "saved" or why not, just above the block's right end
+  function noteEdit(b, text, bad) {
+    if (!editNote) {
+      var holder = el('div', 'talk-ui talk-layer');
+      editNote = el('div', 'talk-edit-note');
+      editNote.setAttribute('aria-live', 'polite');
+      holder.appendChild(editNote);
+      document.body.appendChild(holder);
+    }
+    editNote.textContent = text;
+    editNote.block = b;
+    editNote.classList.toggle('talk-edit-note-ng', !!bad);
+    editNote.hidden = false;
+    var r = b.getBoundingClientRect(), base = editNote.parentNode.getBoundingClientRect();
+    editNote.style.left = Math.max(4, r.right - editNote.offsetWidth) - base.left + 'px';
+    editNote.style.top = r.top - editNote.offsetHeight - 4 - base.top + 'px';
+    clearTimeout(editNote.timer);
+    if (!bad) editNote.timer = setTimeout(function () { editNote.hidden = true; }, 1500);
+  }
+
+  document.addEventListener('focusin', function (e) {
+    var b = editBlock(e.target);
+    if (b && !editOrig.has(b)) {                            // a block that could not be saved keeps its first text
+      var text = squash(b.textContent);
+      editOrig.set(b, { html: b.innerHTML, text: text, key: blockKey(b, text) });
+    }
+  });
+  document.addEventListener('keydown', function (e) {
+    var b = editBlock(e.target);
+    if (!b || e.isComposing || e.keyCode === 229) return;   // Enter while converting (Japanese input) only confirms
+    if (e.key === 'Enter') { e.preventDefault(); b.blur(); }
+    if (e.key === 'Escape') {                               // back as it was; the open card stays
+      var o = editOrig.get(b);
+      if (o) b.innerHTML = o.html;
+      e.stopPropagation();
+      b.blur();
+    }
+  }, true);
+  document.addEventListener('focusout', function (e) {
+    var b = editBlock(e.target), o = b && editOrig.get(b);
+    if (!o) return;
+    dirtyAll();                                             // its text nodes changed: the comments' places too
+    if (b.innerHTML === o.html) {                           // nothing changed, or put back with Esc
+      editOrig.delete(b);
+      b.classList.remove('talk-edit-ng');
+      if (editNote && editNote.block === b) editNote.hidden = true;
+      return;
+    }
+    noteEdit(b, tr('edit.saving'));
+    post('edit', { page: page, tag: o.key.tag, text: o.text, nth: o.key.nth, count: o.key.count, html: sourceHTML(b),
+                   after: squash(b.textContent) })
+      .then(function () { editOrig.delete(b); b.classList.remove('talk-edit-ng'); noteEdit(b, tr('edit.saved')); })
+      .catch(function (err) { b.classList.add('talk-edit-ng'); noteEdit(b, tr('edit.failed', { msg: err.message }), true); });
+  });
 
   // ---------------------------------------------------------------- start, and the API for pages of their own
   window.TalkPage = {

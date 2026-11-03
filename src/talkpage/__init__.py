@@ -11,9 +11,11 @@
   python talkpage.py reports [list | owner THEME NAME ID | read THEME... | read all | unread THEME... | open [--owner S]]
 
 serve: <root> holds the pages; the state of <dir>/<name>.html is kept beside it in <dir>/<name>.talk.json. Only
-127.0.0.1 is served. wait: blocks until the user acts on a page, prints what they did and exits; an agent runs it in
-the background (Claude Code: Bash run_in_background) so that the exit wakes it. reply: answer an item (the reply
-shows on the page). ack: mark what was printed as read without replying. show: all items of a page.
+127.0.0.1 is served. The page's Edit lets the user fix its text in place: the server writes the page's file and keeps
+the fix in the state (edits). wait: blocks until the user acts on a page, prints what they did and exits; an agent
+runs it in the background (Claude Code: Bash run_in_background) so that the exit wakes it. reply: answer an item (the
+reply shows on the page). ack: mark what was printed as read without replying. show: all items of a page, and the
+user's fixes of its text (`~ edit` lines: an agent that builds the page again takes them into its source first).
 P is a page path under the root or a unique part of one. --port defaults to $TALKPAGE_PORT or 8190. --lang: the
 language of the server's own index page (default: $TALKPAGE_LANG, else ja for a Japanese OS, else en); talkpage.js
 follows the <html lang> of each page. The page side is talkpage.js / talkpage.css (served at /_talk/); see README.md.
@@ -33,6 +35,7 @@ import argparse
 import email.errors
 import email.header
 import html
+import html.parser
 import json
 import locale
 import os
@@ -506,6 +509,112 @@ def waiting(it):
     return it.get('user_rev', 0) > it.get('agent_rev', 0)
 
 
+# ---------------------------------------------------------------- the user's fixes of a page's text (Edit on the page)
+EDIT_TAGS = ('p', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'td', 'th', 'dt', 'dd', 'figcaption', 'caption',
+             'blockquote')                     # talkpage.js EDITABLE
+VOID = ('area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr')
+UNSAFE_TAGS = ('script', 'iframe', 'frame', 'frameset', 'object', 'embed', 'applet', 'style', 'link', 'meta', 'base',
+               'form', 'template')
+UNSAFE_URL = re.compile(r'^(javascript|vbscript):', re.I)
+
+
+def squash(t):
+    return re.sub(r'\s+', ' ', t).strip()
+
+
+class Blocks(html.parser.HTMLParser):
+    """The elements <tag> in the body of a page as the page's script sees them: [(start of the content, its end, its
+    text)] in the source, the text squashed; nothing inside data-talk (the script adds its own parts there), template
+    or noscript. open: how many elements <tag> are not closed by their own end tag (where they end is not known)."""
+
+    def __init__(self, src, tag):
+        super().__init__(convert_charrefs=True)
+        self.tag, self.found, self.open, self.stack = tag, [], 0, []
+        self.body = not re.search(r'<body\b', src, re.I)        # a page without <body>: all of it
+        self.lines = [0] + [m.end() for m in re.finditer('\n', src)]
+        self.feed(src)
+        self.close()
+        self.open += sum(1 for e in self.stack if e['start'] is not None)
+
+    def at(self):
+        line, col = self.getpos()
+        return self.lines[line - 1] + col
+
+    def handle_starttag(self, tag, attrs):
+        if tag == 'body':
+            self.body = True
+        if tag in VOID:
+            return
+        skip = (tag in ('template', 'noscript') or any(k == 'data-talk' for k, _ in attrs)
+                or bool(self.stack and self.stack[-1]['skip']))
+        mine = tag == self.tag and self.body and not skip
+        self.stack.append({'tag': tag, 'skip': skip, 'start': self.at() + len(self.get_starttag_text()) if mine else None,
+                           'text': [] if mine else None})
+
+    def handle_endtag(self, tag):
+        for i in range(len(self.stack) - 1, -1, -1):
+            if self.stack[i]['tag'] == tag:
+                e = self.stack[i]
+                if e['start'] is not None:
+                    self.found.append((e['start'], self.at(), squash(''.join(e['text']))))
+                self.open += sum(1 for x in self.stack[i + 1:] if x['start'] is not None)   # ended by this one
+                del self.stack[i:]
+                return
+
+    def handle_data(self, data):
+        for e in self.stack:
+            if e['text'] is not None:
+                e['text'].append(data)
+
+
+def find_block(src, tag, text, nth, count=None):
+    """(start, end) of the content of the nth element <tag> whose text is `text`, in document order. Refused when the
+    file does not hold what the page showed: fewer of them (the page was rebuilt), another number of them than the page
+    counted (`count`; elements made or removed by the page's own script), or elements <tag> whose end is not written
+    (where the browser ends them, and so its count, could differ from this one)."""
+    b = Blocks(src, tag)
+    hits = sorted((a, z) for a, z, t in b.found if t == squash(text))
+    if b.open:
+        raise ValueError("edit: %d <%s> of the file have no </%s>; fix the page's source instead" % (b.open, tag, tag))
+    if nth >= len(hits) or count is not None and count != len(hits):
+        raise ValueError('edit: the file has %d <%s> with this text, the page had %s (was the page rebuilt?)'
+                         % (len(hits), tag, count if count is not None else 'more'))
+    return hits[nth]
+
+
+class Unsafe(html.parser.HTMLParser):
+    """What in a block's new content could run: tags of scripts and embedding, on… attributes, javascript: URLs. The
+    text is only text (a word such as "one=1" or "javascript:" written in it is no markup)."""
+
+    def __init__(self, src):
+        super().__init__(convert_charrefs=True)
+        self.bad = []
+        self.feed(src)
+        self.close()
+
+    def handle_starttag(self, tag, attrs):
+        if tag in UNSAFE_TAGS:
+            self.bad.append('<%s>' % tag)
+        for k, v in attrs:
+            if k.startswith('on'):
+                self.bad.append(k)
+            elif v and UNSAFE_URL.match(re.sub(r'[\x00-\x20]+', '', v)):
+                self.bad.append('%s=%s' % (k, v[:20]))
+
+    handle_startendtag = handle_starttag
+
+
+def replace_file(tmp, path):
+    for i in range(20):                        # Windows: an editor or sync client may hold the file for a moment
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if i == 19:
+                raise
+            time.sleep(0.05)
+
+
 def upgrade(it):
     """Items written without revisions (older review files): the item waits if its last message is the user's."""
     it.setdefault('status', '')
@@ -560,14 +669,7 @@ class Store:
         with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
             json.dump(self.data, f, ensure_ascii=False, indent=1)
             f.write('\n')
-        for i in range(20):                    # Windows: an editor or sync client may hold the file for a moment
-            try:
-                os.replace(tmp, self.path)
-                break
-            except PermissionError:
-                if i == 19:
-                    raise
-                time.sleep(0.05)
+        replace_file(tmp, self.path)
         self.mtime = os.path.getmtime(self.path)
 
     def _next(self):
@@ -644,6 +746,15 @@ class Store:
             self.save()
         return sorted(done, key=natural)
 
+    def edited(self, tag, before, after):
+        """Keep the user's fix of the page's text: an agent that builds the page again takes it into its source first
+        (show lists them). The agent is not woken."""
+        self.data.setdefault('edits', []).append({'time': stamp(), 'tag': tag, 'before': squash(before)[:300],
+                                                  'after': squash(after)[:300]})
+        del self.data['edits'][:-200]
+        self._next()
+        self.save()
+
     def seen(self, iid):
         it = self.item(iid)
         last = max([m.get('rev', 0) for m in it['thread'] if m.get('who') == 'agent' and m.get('text')] or [0])
@@ -655,7 +766,7 @@ class Store:
 
     def view(self):
         return {'page': self.page, 'file': self.path.replace('\\', '/'), 'rev': self.data['rev'],
-                'items': self.data['items']}
+                'items': self.data['items'], 'edits': self.data.get('edits', [])}
 
     def waiting_items(self, undelivered=False):
         out = []
@@ -1039,6 +1150,8 @@ class Talk:
                 if not self.report_mode:
                     return 404, dump({'error': 'the server runs without --reports'})
                 return 200, dump(self.mark(body.get('page'), body.get('star'), body.get('tags'), body.get('hidden')))
+            if path == '/_talk/api/edit':
+                return self.edit(body)
             if path == '/_talk/api/user':
                 s = self.store(body.get('page'))
                 it = s.user(body.get('id'), body.get('title'), body.get('status'), body.get('comment'),
@@ -1063,6 +1176,38 @@ class Talk:
                 return None
             self.cond.notify_all()
             return 200, dump(dict(it, id=body.get('id'), page=s.page, rev=s.data['rev']))
+
+    def edit(self, body):
+        """The user's fix of a block of the page's text (Edit on the page): the block, found in the page's file by its
+        tag, its text and which one of the same it is (of `count`), gets the new content, and the fix is kept in the
+        page's state (edits). Callers hold self.cond."""
+        p, full = self.page_file(body.get('page'))
+        tag, text, nth, count, new, after = (body.get(k) for k in ('tag', 'text', 'nth', 'count', 'html', 'after'))
+
+        def whole(n):
+            return isinstance(n, int) and not isinstance(n, bool) and n >= 0
+        if (tag not in EDIT_TAGS or not isinstance(text, str) or not squash(text) or not whole(nth)
+                or count is not None and not whole(count) or not isinstance(new, str) or len(new) > 50000):
+            raise ValueError('edit: {page, tag (one of %s), text, nth, count?, html, after?}' % ' '.join(EDIT_TAGS))
+        bad = Unsafe(new).bad
+        if bad:
+            raise ValueError('edit: the new content may hold text, links and formatting only, not %s'
+                             % ', '.join(bad[:3]))
+        with open(full, 'rb') as f:
+            raw = f.read()
+        src = raw.decode('utf-8-sig')
+        a, z = find_block(src, tag, text, nth, count)
+        if '\r\n' in src:                      # the file's own line ends
+            new = new.replace('\r\n', '\n').replace('\n', '\r\n')
+        tmp = full + '.tmp'
+        with open(tmp, 'wb') as f:
+            f.write((b'\xef\xbb\xbf' if raw.startswith(b'\xef\xbb\xbf') else b'') +
+                    (src[:a] + new + src[z:]).encode('utf-8'))
+        replace_file(tmp, full)
+        s = self.store(p)
+        s.edited(tag, text, after if isinstance(after, str) else html.unescape(re.sub(r'<[^>]*>', '', new)))
+        self.cond.notify_all()
+        return 200, dump({'page': p, 'rev': s.data['rev']})
 
     def listing(self):
         m = LISTING[self.lang]
@@ -1441,6 +1586,8 @@ def cmd_show(a):
             if msgs:
                 m = msgs[-1]
                 print('    last %s %s: %s' % (m['who'], m.get('time', '')[5:16], m['text'].splitlines()[0][:100]))
+        for e in d.get('edits', []):           # the user's own fixes of the text: take them in before building it again
+            print('~ edit %s <%s>  %s  ->  %s' % (e['time'][5:16], e['tag'], e['before'][:100], e['after'][:100]))
 
 
 def reports_data(a):
@@ -1573,7 +1720,7 @@ def main():
     s = sub.add_parser('ack', help='mark what waits as read without replying')
     s.add_argument('--page')
     s.add_argument('--id', action='append', help='only these items (repeat)')
-    s = sub.add_parser('show', help='all items of a page')
+    s = sub.add_parser('show', help="all items of a page, and the user's fixes of its text (~ edit)")
     s.add_argument('--page')
     s = sub.add_parser('reports', help='the reports of a server run with --reports')
     s.add_argument('action', nargs='?', default='list', choices=('list', 'owner', 'read', 'unread', 'open'))

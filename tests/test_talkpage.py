@@ -76,6 +76,43 @@ class StoreTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.s.user('C1', anchor='top')
 
+    def test_edit_page_text(self):
+        page = os.path.join(self.dir, 'p.html')
+        src = ('﻿<!doctype html>\r\n<html><head><title>same</title></head><body>\r\n<p>same</p>\r\n'
+               '<div data-talk="A"><p>same</p></div>\r\n<template><p>same</p></template>\r\n'
+               '<ul><li>a &amp; <b>b</b></li><li>same<ul><li>in</li></ul></li></ul>\r\n<p>same</p>\r\n</body></html>\r\n')
+        with open(page, 'w', encoding='utf-8', newline='') as f:
+            f.write(src)
+        talk = tp.Talk(self.dir)
+
+        def edit(**kw):
+            with talk.cond:
+                return talk.edit(dict({'page': 'p.html'}, **kw))
+        # the 2nd <p> with this text outside data-talk and template, of 2; the file keeps its BOM and CRLF
+        edit(tag='p', text=' same ', nth=1, count=2, html='fixed\n<a href="x">link</a> one=1', after='fixed link one=1')
+        edit(tag='li', text='a & b', nth=0, html='a &amp; <b>c</b>')
+        with open(page, encoding='utf-8', newline='') as f:
+            out = f.read()
+        self.assertEqual(out, src.replace('<p>same</p>\r\n</body>', '<p>fixed\r\n<a href="x">link</a> one=1</p>\r\n</body>')
+                         .replace('<b>b</b>', '<b>c</b>'))
+        edits = talk.store('p.html').data['edits']
+        self.assertEqual([(e['tag'], e['before'], e['after']) for e in edits],
+                         [('p', 'same', 'fixed link one=1'), ('li', 'a & b', 'a & c')])
+        for bad in (dict(nth=1),                                           # only one left
+                    dict(nth=0, count=2),                                  # the page saw another number of them
+                    dict(nth=0, html='<img src=x onerror=alert(1)>'),
+                    dict(nth=0, html='<a href=" java\tscript:alert(1)">x</a>'),
+                    dict(nth=0, html='<script>x</script>'),
+                    dict(nth=0, tag='div'),
+                    dict(nth=0, page='../p.html')):
+            with self.assertRaises(ValueError, msg=bad):
+                edit(**dict({'tag': 'p', 'text': 'same', 'html': 'x'}, **bad))
+        with open(page, 'w', encoding='utf-8') as f:                       # an <li> without </li>: no guess
+            f.write('<body><ul><li>one<li>two</li></ul><p>three</p></body>')
+        with self.assertRaises(ValueError):
+            edit(tag='li', text='two', nth=0, html='2')
+        edit(tag='p', text='three', nth=0, html='3')                        # other tags are fine
+
     def test_deleted_file_starts_over(self):
         self.s.user('C1', status='NG')
         rev = self.s.data['rev']
@@ -270,6 +307,21 @@ class HttpTest(unittest.TestCase):
             items = json.load(f)['items']
         self.assertEqual((items['C1']['anchor'], items['C2']['anchor']), (anchor, {'pos': 0.5}))
         self.assertIn('C1', self.cli('ack', '--page', 'r1').stdout)
+
+    def test_5_edit(self):
+        write(self.root, 'notes/fix.html', '<!doctype html><title>f</title><body><p>Old  text</p></body>')
+        body = {'page': 'notes/fix.html', 'tag': 'p', 'text': 'Old text', 'nth': 0, 'count': 1, 'html': 'New text'}
+        self.assertEqual(self.req('/_talk/api/edit', body, {'Origin': None})[0], 403)       # a write: our Origin only
+        self.assertEqual(self.req('/_talk/api/edit', body, {'Origin': 'https://evil.example'})[0], 403)
+        code, d = self.req('/_talk/api/edit', body)
+        self.assertEqual((code, d['page']), (200, 'notes/fix.html'))
+        self.assertIn(b'<p>New text</p>', self.req('/notes/fix.html')[1])
+        code, d = self.req('/_talk/api/edit', body)                                    # the old text is gone
+        self.assertEqual(code, 400)
+        self.assertIn('the file has 0 <p> with this text', d['error'])
+        self.assertEqual(self.req('/_talk/api/state?page=notes/fix.html')[1]['edits'][0]['after'], 'New text')
+        self.assertEqual(self.req('/_talk/api/pending?page=fix')[1]['items'], [])      # the agent is not woken
+        self.assertIn('<p>  Old text  ->  New text', self.cli('show', '--page', 'fix').stdout)
 
 
 def write(root, path, text):
