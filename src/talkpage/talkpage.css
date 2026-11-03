@@ -276,6 +276,12 @@ body { padding-bottom: 64px; }
 /* a layer of the page over the whole window is open (talkpage.js watchCover): it stays on top of our parts */
 .talk-covered .talk-layer, .talk-covered .talk-dock, .talk-covered .talk-sb, .talk-covered .talk-sbbar,
 .talk-covered .talk-sb-back, .talk-covered .talk-unzoom { visibility: hidden; }
+/* over the picture of such a layer: the zoom and how to use it (the wheel zooms, a drag moves) */
+.talk-pic-note {
+  position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 2147483000; pointer-events: none;
+  padding: 3px 12px; font-size: 12px; line-height: 1.6; color: #fff; background: rgba(0, 0, 0, .6); border-radius: 12px; white-space: nowrap;
+}
+.talk-pic-note[hidden] { display: none; }
 
 /* after a pinch zoom (placed by talkpage.js on what is on screen) */
 .talk-unzoom {

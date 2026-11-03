@@ -43,6 +43,7 @@
       'edit': 'Edit',
       'edit.title': 'Fix the text in place: each block is saved when you leave it or press Enter; Esc puts it back',
       'edit.one.title': 'Fix this block in place (Enter or a click elsewhere saves, Esc puts it back)',
+      'pic.note': '{z}%  Wheel to zoom, drag to move, click or Esc to close',
       'edit.saving': 'Saving…',
       'edit.saved': 'Saved',
       'edit.failed': 'Not saved: {msg}',
@@ -124,6 +125,7 @@
       'edit': '編集',
       'edit.title': '本文をその場で書き換える（塊ごとに保存。Enter か、ほかの所を押すと保存、Esc で取り消し）',
       'edit.one.title': 'この塊をその場で書き換える（Enter か、ほかの所を押すと保存、Esc で取り消し）',
+      'pic.note': '{z}%　ホイールで拡大・縮小、ドラッグで移動、クリックか Esc で閉じる',
       'edit.saving': '保存中…',
       'edit.saved': '保存しました',
       'edit.failed': '保存できませんでした：{msg}',
@@ -1967,8 +1969,75 @@
       if (found === cover) return;
       cover = found;
       html.classList.toggle('talk-covered', !!cover);
+      picReset();
     }).observe(document.body, { subtree: true, childList: true, attributes: true,
                                 attributeFilter: ['class', 'style', 'hidden', 'open'] });
+    watchPicture();
+  }
+
+  // a picture shown large by such a layer: the wheel (with Ctrl or not) zooms it around the pointer, up to 16 times, and a
+  // drag moves it. A click that did not drag still closes the layer as the page does, and so does Esc
+  var pic = null, picZ = 1, picX = 0, picY = 0, picDrag = null, picMoved = false, picNote = null;
+  function picOf(layer) {                                   // the largest picture in the layer (an outer svg, not its parts)
+    var best = null, area = 0;
+    layer.querySelectorAll('img, svg, canvas, video').forEach(function (e) {
+      if (e.parentElement && e.parentElement.closest('svg')) return;
+      var r = e.getBoundingClientRect();
+      if (r.width * r.height > area) { area = r.width * r.height; best = e; }
+    });
+    return best;
+  }
+  function picSet() {
+    pic.style.transformOrigin = '0 0';
+    pic.style.transform = picZ === 1 ? '' : 'translate(' + picX + 'px, ' + picY + 'px) scale(' + picZ + ')';
+    pic.style.cursor = picZ === 1 ? '' : picDrag ? 'grabbing' : 'grab';
+    picNote.textContent = tr('pic.note', { z: Math.round(picZ * 100) });
+  }
+  function picReset() {
+    if (pic) { pic.style.transform = pic.style.transformOrigin = pic.style.cursor = ''; }
+    pic = null; picZ = 1; picX = picY = 0; picDrag = null;
+    if (!picNote) { picNote = el('div', 'talk-ui talk-pic-note'); document.body.appendChild(picNote); }
+    picNote.hidden = true;
+    if (cover && (pic = picOf(cover))) { picNote.hidden = false; picSet(); }
+  }
+  function watchPicture() {
+    window.addEventListener('wheel', function (e) {
+      if (!cover || !pic || !pic.isConnected) return;
+      e.preventDefault();
+      e.stopPropagation();                                  // not the report's zoom (Ctrl) behind the layer
+      var r = pic.getBoundingClientRect(), ox = r.left - picX, oy = r.top - picY;
+      // by the amount turned: a notch of a mouse wheel (100 px) is 1.25 times, a touchpad's small steps zoom smoothly
+      var d = e.deltaY * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? window.innerHeight : 1);
+      var z = Math.min(16, Math.max(1, picZ * Math.pow(1.25, Math.max(-4, Math.min(4, -d / 100)))));
+      if (z === 1) { picX = picY = 0; }
+      else {                                                // the point under the pointer stays under it
+        picX = e.clientX - ox - (e.clientX - ox - picX) * z / picZ;
+        picY = e.clientY - oy - (e.clientY - oy - picY) * z / picZ;
+      }
+      picZ = z;
+      picSet();
+    }, { passive: false, capture: true });
+    window.addEventListener('pointerdown', function (e) {
+      if (!cover || !pic || picZ === 1 || e.button !== 0) return;
+      e.preventDefault();                                   // no dragging of the image itself
+      picDrag = { x: e.clientX - picX, y: e.clientY - picY, sx: e.clientX, sy: e.clientY };
+      picMoved = false;
+      picSet();
+    }, true);
+    window.addEventListener('pointermove', function (e) {
+      if (!picDrag) return;
+      if (Math.abs(e.clientX - picDrag.sx) + Math.abs(e.clientY - picDrag.sy) > 4) picMoved = true;
+      picX = e.clientX - picDrag.x;
+      picY = e.clientY - picDrag.y;
+      picSet();
+    }, true);
+    window.addEventListener('pointerup', function () { if (picDrag) { picDrag = null; picSet(); } }, true);
+    window.addEventListener('click', function (e) {          // the click that ends a drag does not close the layer
+      if (!picMoved) return;
+      picMoved = false;
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
   }
 
   // <body data-talk-listing>: the server's list of reports (no page file, so no state): the sidebar and zoom only

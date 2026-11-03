@@ -311,7 +311,9 @@ sidebar marks starred rows with ★; under `--place` it groups the reports by he
   fingernail; that side's corners are shown square (the report's own CSS is mended so as it is served)
 - While a layer of the page covers the window (a picture enlarged by a click, a dialog), the cards, the selection's
   buttons, the box at the bottom right and the sidebar are hidden (the layer stays on top). The sidebar sits low
-  (z-index 7-9), under what the page puts over it
+  (z-index 7-9), under what the page puts over it. The largest picture in that layer (img, svg, canvas, video) zooms
+  with the wheel (with or without Ctrl) around the pointer, up to 16 times, and moves with a drag while zoomed; the zoom
+  and how to use it show at the bottom. A click without a drag still closes the layer as the page does (Esc too)
 - The last round of a theme ends with a "Did you read this report" item (Read / Again; does not wake the agent);
   pressing it reloads the sidebar's list at once (the other pages' read marks come from their state files each
   time the server lists them)
