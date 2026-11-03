@@ -369,6 +369,7 @@
     render(d.id);
     if (cards[d.id]) { renderCard(cards[d.id]); relayout(); }
     updateDock();
+    if (d.id === 'read' && SIDEBAR) loadReports();   // "read" on this page: the sidebar's list at once, not in 30 s
   }
 
   // ---------------------------------------------------------------- dock (fixed, bottom right)

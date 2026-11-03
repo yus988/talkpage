@@ -295,7 +295,9 @@ sidebar marks starred rows with ★; under `--place` it groups the reports by he
   back. ☰ is a round button at the bottom left. Text fields use 16 px (smaller ones make iOS zoom in on a tap and stay)
 - A rounded box with a thick line on one side only (a state's colour stripe) bends the line along the corners like a
   fingernail; that side's corners are shown square (the report's own CSS is mended so as it is served)
-- The last round of a theme ends with a "Did you read this report" item (Read / Again; does not wake the agent)
+- The last round of a theme ends with a "Did you read this report" item (Read / Again; does not wake the agent);
+  pressing it reloads the sidebar's list at once (the other pages' read marks come from their state files each
+  time the server lists them)
 - A hidden tab stops long polling and asks every 20 s (a browser keeps at most 6 connections to one server); it goes
   back to long polling as soon as it is shown
 
