@@ -257,9 +257,13 @@ sidebar marks starred rows with ★; under `--place` it groups the reports by he
   another item when the items were renumbered is skipped unless a heading inside it still matches), else the same
   share of the way down. The hints are kept in the item's `anchor` (for a new comment at its first send, for an older
   one once its text is found). Only comments with nothing to go by are listed at the end
+- A card's head is one row: the id, a speech bubble with the number of messages (opens and closes the card), the mark
+  (New reply, AI unread, …), then "Resolve", ⤢ and "Send" at the right end ("Send" with nothing written opens the
+  card and goes to its box). The box to write in spans the card
 - A closed card shows the agent's summary (`reply --summary`, up to 3 lines) or the first line of the last message.
-  The frame of an open card, or ⤢, shows the whole thread in the middle of the screen (background or Esc closes it).
-  With less than 240 px of right margin, only numbers are shown at the right edge
+  The frame of an open card, or ⤢, shows the whole thread in the middle of the screen (background or Esc closes it);
+  its head stays at the top while the thread scrolls, with "Resolve", ⤡ (back to the card) and "Send" in the same
+  order. With less than 240 px of right margin, only numbers are shown at the right edge (and ⤡ becomes ×)
 - "Resolved" hides the card and its highlight without waking the agent; the dock's "Resolved n" shows them faded,
   each with "Reopen"
 - A reply never opens a closed card; it is marked "New reply" and counted as `(n)` at the start of the tab's name

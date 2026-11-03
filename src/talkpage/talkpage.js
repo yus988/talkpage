@@ -30,9 +30,16 @@
       'mark.read': 'Read by agent',
       'mark.err': 'Not saved',
       'mark.wait.title': 'The agent has not read what you wrote yet',
+      'mark.short.new': 'New reply',
+      'mark.short.wait': 'AI unread',
+      'mark.short.read': 'AI read',
+      'mark.short.err': 'Not saved',
       'comment': 'Comment',
       'comment.ph': 'Comment (Ctrl+Enter sends)',
       'send': 'Send',
+      'send.title': 'Send (Ctrl+Enter)',
+      'thread.toggle': 'Show or hide the thread',
+      'shrink': 'Back to the card',
       'who.agent': 'Agent',
       'who.user': 'You',
       'cleared': 'cleared the status',
@@ -90,9 +97,16 @@
       'mark.read': 'エージェント既読',
       'mark.err': '保存の失敗',
       'mark.wait.title': 'エージェントがまだ読んでいない書き込みがあります',
+      'mark.short.new': '新しい返信',
+      'mark.short.wait': 'AI 未読',
+      'mark.short.read': 'AI 既読',
+      'mark.short.err': '保存の失敗',
       'comment': 'コメント',
       'comment.ph': 'コメント（Ctrl+Enter で送信）',
       'send': '送信',
+      'send.title': '送信（Ctrl+Enter）',
+      'thread.toggle': 'やりとりの表示の切り替え',
+      'shrink': 'カードに戻す',
       'who.agent': 'エージェント',
       'who.user': 'あなた',
       'cleared': '状態を解除',
@@ -146,7 +160,8 @@
   ['listening', 'working', 'absent', 'down'].forEach(function (p) {
     PRESENCE[p] = [tr('presence.' + p), tr('presence.' + p + '.title')];
   });
-  var MARKS = { 'new': tr('mark.new'), wait: tr('mark.wait'), read: tr('mark.read'), err: tr('mark.err') };
+  var MARKS = {}, SHORT_MARKS = {};       // SHORT_MARKS: in a comment card's one-row head
+  ['new', 'wait', 'read', 'err'].forEach(function (m) { MARKS[m] = tr('mark.' + m); SHORT_MARKS[m] = tr('mark.short.' + m); });
   var items = {};          // id -> item as the server keeps it
   var ui = {};             // id -> the item's elements and settings
   var order = [];          // declared ids in document order
@@ -275,9 +290,9 @@
   function fail(u, e) { mark(u, 'err'); u.mark.title = String(e && e.message || e); }
 
   function mark(u, m) {
-    u.mark.textContent = MARKS[m] || '';
+    u.mark.textContent = (u.short ? SHORT_MARKS : MARKS)[m] || '';
     u.mark.setAttribute('data-m', m);
-    u.mark.title = m === 'wait' ? tr('mark.wait.title') : '';
+    u.mark.title = m === 'wait' ? tr('mark.wait.title') : u.short ? MARKS[m] || '' : '';
   }
 
   function paint(u, s) {
@@ -749,13 +764,27 @@
   }
 
   function makeCard(id, scope, title, isDraft) {
-    var c = { id: id, card: true, scope: scope, title: title, open: false, visible: false, shown: -1 };
+    var c = { id: id, card: true, scope: scope, title: title, open: false, visible: false, shown: -1, short: true };
     c.el = el('div', 'talk-ui talk-rcard');
+    // one row at the top: the id, a speech bubble with the number of messages (opens and closes the card), the mark
+    // (new reply …), then resolve, ⤢ and send at the right end; the box to write in below spans the card
     var head = el('div', 'talk-rcard-head');
     c.idEl = el('span', 'talk-rcard-id', id);
+    c.bub = button('talk-rcard-bub', '');
+    c.bub.appendChild(bubble());
+    c.count = el('span', 'talk-count');
+    c.bub.appendChild(c.count);
+    c.bub.title = tr('thread.toggle');
+    c.bub.setAttribute('aria-label', tr('comment'));
+    c.bub.setAttribute('aria-expanded', 'false');
     c.mark = el('span', 'talk-mark');
-    head.appendChild(c.idEl);
-    head.appendChild(c.mark);
+    c.res = button('talk-rcard-res', tr('resolve'));
+    c.expand = button('talk-rcard-exp', '⤢');
+    c.expand.title = tr('expand');
+    c.expand.setAttribute('aria-label', tr('expand'));
+    c.send = button('talk-send', tr('send'));
+    c.send.title = tr('send.title');
+    [c.idEl, c.bub, c.mark, c.res, c.expand, c.send].forEach(function (x) { head.appendChild(x); });
     c.quote = el('div', 'talk-rcard-quote', title);
     c.sum = el('div', 'talk-rcard-sum');
     c.body = el('div', 'talk-rcard-body');
@@ -764,22 +793,18 @@
     c.ta = el('textarea');
     c.ta.rows = 2;
     c.ta.placeholder = tr('comment.ph');
-    c.send = button('talk-send', tr('send'));
     form.appendChild(c.ta);
-    form.appendChild(c.send);
-    var acts = el('div', 'talk-rcard-acts');
-    c.res = button('talk-rcard-res', tr('resolve'));
-    c.expand = button('talk-rcard-exp', '⤢');
-    c.expand.title = tr('expand');
-    c.expand.setAttribute('aria-label', tr('expand'));
-    acts.appendChild(c.res);
-    acts.appendChild(c.expand);
-    [c.lines, form, acts].forEach(function (x) { c.body.appendChild(x); });
+    [c.lines, form].forEach(function (x) { c.body.appendChild(x); });
     [head, c.quote, c.sum, c.body].forEach(function (x) { c.el.appendChild(x); });
     c.pin = button('talk-ui talk-pin', id);
     c.el.addEventListener('click', function (e) {
       if (e.target.closest('button, textarea, a')) return;
       if (!c.open) openCard(c); else openBig(c);
+    });
+    c.bub.addEventListener('click', function () {
+      if (c.draft) c.ta.focus({ preventScroll: true });
+      else if (c.open) closeCard(c);
+      else openCard(c);
     });
     c.expand.addEventListener('click', function () { openBig(c); });
     c.pin.addEventListener('click', function () { openBig(c); });
@@ -793,6 +818,15 @@
     byThread.set(c.el, c);
     if (io) io.observe(c.el);
     return c;
+  }
+
+  function bubble() {                                       // a speech bubble in the text's colour
+    var NS = 'http://www.w3.org/2000/svg', svg = document.createElementNS(NS, 'svg'), p = document.createElementNS(NS, 'path');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('aria-hidden', 'true');
+    p.setAttribute('d', 'M2.5 2.5h11a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H7.5L4.5 14v-2.5h-2a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z');
+    svg.appendChild(p);
+    return svg;
   }
 
   // an unsent comment of a card on the server survives a reload (this browser only), as on an item
@@ -819,6 +853,7 @@
     c.waiting = it.user_rev > it.agent_rev;
     c.resolved = isResolved(it.status || '');
     mark(c, c.unread ? 'new' : c.waiting ? 'wait' : it.user_rev > 0 ? 'read' : '');
+    c.count.textContent = msgs.length ? String(msgs.length) : '';
     var last = msgs[msgs.length - 1];
     c.sum.textContent = it.summary ? String(it.summary)
       : last ? tr(last.who === 'agent' ? 'who.agent' : 'who.user') + ': ' + firstLine(last.text) : '';
@@ -859,6 +894,7 @@
     openNow = c;
     c.open = true;
     c.el.classList.add('talk-open');
+    c.bub.setAttribute('aria-expanded', 'true');
     paintMarks();
     relayout();
     seen(c);
@@ -868,6 +904,7 @@
     if (c === draft) { dropDraft(); return; }
     c.open = false;
     c.el.classList.remove('talk-open');
+    c.bub.setAttribute('aria-expanded', 'false');
     if (openNow === c) openNow = null;
     paintMarks();
     relayout();
@@ -890,6 +927,7 @@
     openNow = c;
     c.open = true;
     c.el.classList.add('talk-open');
+    c.bub.setAttribute('aria-expanded', 'true');
     layout();
     if (s.pins) openBig(c); else c.ta.focus({ preventScroll: true });
   }
@@ -909,7 +947,12 @@
 
   function sendCard(c, ta) {
     var text = ta.value.trim();
-    if (!text || c.busy) return;
+    if (c.busy) return;
+    if (!text) {                                          // send in the head with nothing written: the box to write in
+      if (!c.open) openCard(c);
+      ta.focus({ preventScroll: true });
+      return;
+    }
     c.busy = true;
     c.send.disabled = true;
     if (big) big.send.disabled = true;
@@ -955,13 +998,18 @@
     var box = el('div', 'talk-modal-box');
     box.setAttribute('role', 'dialog');
     box.setAttribute('aria-modal', 'true');
+    // the head stays at the top while the thread scrolls: the id, then resolve, back to the card (× with no card to go
+    // back to) and send at the right end, as in the card
     var head = el('div', 'talk-modal-head');
     head.appendChild(el('span', 'talk-rcard-id', c.idEl.textContent));     // with ≈ when near its old place
-    var x = button('talk-modal-close', '×');
-    x.title = tr('close');
-    x.setAttribute('aria-label', tr('close'));
-    head.appendChild(x);
     var b = { c: c, el: m, shown: -1 };
+    b.res = button('talk-rcard-res', '');
+    var x = button('talk-modal-close', c.scope.pins ? '×' : '⤡');
+    x.title = tr(c.scope.pins ? 'close' : 'shrink');
+    x.setAttribute('aria-label', x.title);
+    b.send = button('talk-send', tr('send'));
+    b.send.title = tr('send.title');
+    [b.res, x, b.send].forEach(function (y) { head.appendChild(y); });
     b.sum = el('div', 'talk-modal-sum');
     b.list = el('div', 'talk-entries talk-modal-list');
     var form = el('div', 'talk-form');
@@ -969,13 +1017,8 @@
     b.ta.rows = 3;
     b.ta.placeholder = tr('comment.ph');
     b.ta.value = c.ta.value;
-    b.send = button('talk-send', tr('send'));
     form.appendChild(b.ta);
-    form.appendChild(b.send);
-    var acts = el('div', 'talk-rcard-acts');
-    b.res = button('talk-rcard-res', '');
-    acts.appendChild(b.res);
-    [head, el('blockquote', 'talk-modal-quote', c.title), b.sum, b.list, form, acts]
+    [head, el('blockquote', 'talk-modal-quote', c.title), b.sum, b.list, form]
       .forEach(function (y) { box.appendChild(y); });
     m.appendChild(box);
     m.addEventListener('click', function (e) { if (e.target === m) closeBig(); });

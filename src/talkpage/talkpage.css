@@ -110,16 +110,17 @@ body { padding-bottom: 64px; }
   border: 0; border-radius: 14px; padding: 2px 12px; cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, .2);
 }
 .talk-selbtn[hidden], .talk-rcard[hidden], .talk-pin[hidden], .talk-lost[hidden], .talk-modal-sum[hidden],
-.talk-rcard-acts button[hidden], .talk-sb[hidden], .talk-sb-pane[hidden], .talk-sb-body[hidden], .talk-sb-rows[hidden] { display: none; }
+.talk-rcard-head button[hidden], .talk-modal-head button[hidden], .talk-sb[hidden], .talk-sb-pane[hidden], .talk-sb-body[hidden], .talk-sb-rows[hidden] { display: none; }
 .talk-rcard {
   position: absolute; box-sizing: border-box; padding: 6px 10px; font: 13px/1.5 system-ui, sans-serif; color: var(--talk-fg);
   background: var(--talk-bg); border: 1px solid var(--talk-line); border-radius: 8px; box-shadow: 0 1px 4px rgba(0, 0, 0, .1); cursor: pointer;
 }
 .talk-rcard.talk-open { z-index: 2; border-color: var(--talk-accent); box-shadow: 0 3px 14px rgba(0, 0, 0, .18); cursor: default; }
 .talk-rcard.talk-done { opacity: .55; }
-.talk-rcard-head { display: flex; align-items: baseline; gap: 8px; }
-.talk-rcard-id { font-weight: 700; color: var(--talk-accent); }
-.talk-rcard .talk-mark { min-width: 0; }
+/* the head: one row (id, 💬 n, mark, resolve ⤢ send), nothing wraps; the mark gives way */
+.talk-rcard-head { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.talk-rcard-id { flex: none; font-weight: 700; color: var(--talk-accent); }
+.talk-rcard .talk-mark { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .talk-rcard-quote { display: none; color: var(--talk-muted); font-size: 12px; border-left: 3px solid rgba(255, 190, 0, .8); padding-left: 6px; margin: 2px 0; }
 /* a card only near its old place (≈ before the id): the text it was about, in two lines at most */
 .talk-rcard-moved .talk-rcard-id { color: var(--talk-muted); }
@@ -134,13 +135,19 @@ body { padding-bottom: 64px; }
 .talk-rcard-line { margin: 3px 0; padding: 2px 8px 3px; border-radius: 6px; background: var(--talk-user-bg); }
 .talk-rcard-line.talk-agent { background: var(--talk-agent-bg); }
 .talk-rcard-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.talk-rcard-acts { display: flex; justify-content: space-between; gap: 6px; margin-top: 4px; }
 .talk-rcard button, .talk-modal button, .talk-pin {
   font: inherit; font-size: 12px; color: var(--talk-fg); background: var(--talk-bg);
   border: 1px solid var(--talk-line); border-radius: 14px; padding: 0 10px; cursor: pointer;
 }
 .talk-rcard button:hover, .talk-modal button:hover, .talk-pin:hover { border-color: var(--talk-muted); }
-.talk-rcard-exp { margin-left: auto; }
+.talk-rcard-head button { flex: none; height: 22px; padding: 0 7px; line-height: 20px; }
+.talk-rcard-head .talk-rcard-exp { width: 22px; padding: 0; }
+.talk-rcard-bub { display: inline-flex; align-items: center; gap: 3px; }
+.talk-rcard-bub svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; }
+.talk-rcard-bub .talk-count { min-width: 0; }
+.talk-rcard-bub[aria-expanded="true"] { color: var(--talk-accent); border-color: var(--talk-accent) !important; }
+.talk-rcard-head .talk-send, .talk-modal-head .talk-send { color: var(--talk-accent); border-color: var(--talk-accent); }
+.talk-rcard .talk-form, .talk-modal .talk-form { margin-top: 4px; }
 .talk-pin { position: absolute; padding: 0 6px; font: 11px/1.6 system-ui, sans-serif; font-weight: 700; color: var(--talk-accent); }
 .talk-pin.talk-pin-new { color: #fff; background: var(--talk-accent); border-color: var(--talk-accent); }
 
@@ -156,8 +163,14 @@ body { padding-bottom: 64px; }
   box-sizing: border-box; width: min(760px, calc(100vw - 32px)); max-height: 86vh; overflow-y: auto; padding: 12px 18px;
   font: 14px/1.6 system-ui, sans-serif; color: var(--talk-fg); background: var(--talk-bg); border-radius: 10px; box-shadow: 0 8px 30px rgba(0, 0, 0, .35);
 }
-.talk-modal-head { display: flex; align-items: center; justify-content: space-between; }
-.talk-modal-close { font-size: 16px !important; line-height: 1.4; }
+/* the head stays at the top while the thread scrolls under it (over the box's padding, edge to edge) */
+.talk-modal-head {
+  position: sticky; top: -12px; z-index: 1; display: flex; align-items: center; gap: 6px;
+  margin: -12px -18px 6px; padding: 10px 18px 8px; background: var(--talk-bg); border-bottom: 1px solid var(--talk-line);
+}
+.talk-modal-head .talk-rcard-id { margin-right: auto; }
+.talk-modal-head button { flex: none; height: 26px; line-height: 24px; }
+.talk-modal-close { width: 30px; padding: 0 !important; font-size: 15px !important; }
 .talk-modal-quote { margin: 6px 0; padding: 2px 10px; color: var(--talk-muted); border-left: 3px solid rgba(255, 190, 0, .8); }
 .talk-modal-sum { margin: 6px 0; padding: 6px 10px; border: 1px dashed var(--talk-line); border-radius: 6px; white-space: pre-wrap; }
 
