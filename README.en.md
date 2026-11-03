@@ -303,7 +303,7 @@ sidebar marks starred rows with ★; under `--place` it groups the reports by he
 | | |
 |---|---|
 | `talkpage reports` / `reports list` | unread (oldest first), read and single pages as `theme<TAB>round<TAB>owner<TAB>title`, with ` [comments: C1,C2]` for unanswered comments and ` [open]` for pages open in a tab |
-| `reports owner <theme> <name> <id>` | write the theme's owner (the name and id of the session that wrote it) to `<root>/owners.json` (under `--place`: to the `owners.json` of the folder whose id starts the theme, keyed without the id) |
+| `reports owner <theme> <name> <id>` | write the theme's owner (the name and id of the session that wrote it) to `<root>/owners.json` (under `--place`: to the `owners.json` of the folder whose id starts the theme, keyed without the id); the other themes with the same id take the name too (a renamed session). The list and the sidebars show one name per id (the one most of its themes carry) |
 | `reports read <theme>…` / `reports read all` / `reports unread <theme>…` | set or clear "Read" on the last round |
 | `reports open [--owner text]` | open the unread pages in the default browser (not those already open in a tab); with `--owner`, the themes whose owner contains the text, read or not |
 

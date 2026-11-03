@@ -200,7 +200,7 @@ talkpage serve --reports --place "sdk-workspace:notes=C:/ws-a/dev-notes" --place
 | | |
 |---|---|
 | `talkpage reports` / `reports list` | 未読（古い順）・既読・1 枚のページを `テーマ<TAB>回<TAB>担当<TAB>題` で出す。答えていないコメントは ` [comments: C1,C2]`、タブで開いているものは ` [open]` |
-| `reports owner <テーマ> <名前> <id>` | そのテーマの担当（レポートを書いたセッションの名前と id）を `<root>/owners.json` に書く（`--place` なら、テーマの頭の id のフォルダの `owners.json` に、id を除いたキーで） |
+| `reports owner <テーマ> <名前> <id>` | そのテーマの担当（レポートを書いたセッションの名前と id）を `<root>/owners.json` に書く（`--place` なら、テーマの頭の id のフォルダの `owners.json` に、id を除いたキーで）。同じ id のほかのテーマの名前も書き換える（セッションの名前を変えたとき）。一覧とサイドバーでは、名前は id ごとに揃える（多くのテーマに付いている名前） |
 | `reports read <テーマ>…` / `reports read all` / `reports unread <テーマ>…` | 最後の回の「読んだ」を付ける・外す |
 | `reports open [--owner 文字]` | 未読のページを既定のブラウザで開く（タブで開いているものは除く）。`--owner` なら担当の名前にその文字を含むテーマを、既読も含めて開く |
 

@@ -443,6 +443,22 @@ def report_key(page):
     return '/'.join(parts[:-1]) if parts[-1] == 'index.html' and len(parts) > 1 else page
 
 
+def owner_names(owners):
+    """{theme: owner name} with one name per session id, the one most of its themes carry: a theme left with an old
+    name (the session was renamed) still goes into the same group."""
+    count = {}
+    for v in owners.values():
+        if isinstance(v.get('id'), str) and v['id'] and isinstance(v.get('name'), str):
+            c = count.setdefault(v['id'], {})
+            c[v['name']] = c.get(v['name'], 0) + 1
+    best = {i: max(c, key=c.get) for i, c in count.items()}
+    out = {}
+    for t, v in owners.items():
+        name = best.get(v.get('id')) or v.get('name')
+        out[t] = name if isinstance(name, str) else ''
+    return out
+
+
 def bad_part(s):
     """A part of a URL path that is never served: empty, . and .., a hidden name, a backslash, and a colon (on
     Windows a drive, which would leave the folder, or a file's stream)."""
@@ -947,6 +963,7 @@ class Talk:
         """The reports under the places, newest first."""
         found = self.walk_reports()
         owners, marks = self.owners(), self.marks()
+        names = owner_names(owners)
         rows = []
         with self.cond:
             for theme, r, page, full, t, title, lang, pl in found:
@@ -960,7 +977,7 @@ class Talk:
                     s.fresh()
                 read = s.data['items'].get('read', {}).get('status', '') if s else ''
                 comments = [x['id'] for x in s.waiting_items() if any('text' in m for m in x['new'])] if s else []
-                owner = owners.get(theme, {}).get('name', '')
+                owner = names.get(theme, '')
                 owner_id = owners.get(theme, {}).get('id', '')
                 mk = marks.get(page, {})
                 tags = mk.get('tags') if isinstance(mk.get('tags'), list) else []
@@ -1655,6 +1672,9 @@ def cmd_reports(a):
             if not isinstance(owners, dict):
                 raise SystemExit('talkpage: %s is not a JSON object' % path)
         owners[key] = {'name': name, 'id': sid}
+        for v in owners.values():               # the session's other themes take the name too (it may have been renamed)
+            if isinstance(v, dict) and v.get('id') == sid:
+                v['name'] = name
         tmp = path + '.tmp'
         with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
             json.dump(owners, f, ensure_ascii=False, indent=1, sort_keys=True)

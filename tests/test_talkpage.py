@@ -467,6 +467,16 @@ class ReportsTest(unittest.TestCase):
         self.assertIn('== read: 1\ncad/widget/case-fit\t20261025-0042-r1\tケース\tcase fit', out)
         self.assertIn('== pages: 4', out)
         self.assertIn('review\t-\t-\t<b>review', out)
+        # one name per session: naming one of its themes renames the others
+        self.cli('reports', 'owner', 'review', 'ケース', 'sid-2')
+        self.cli('reports', 'owner', 'review', 'ケース改', 'sid-2')
+        with open(os.path.join(self.root, 'owners.json'), encoding='utf-8') as f:
+            self.assertEqual(json.load(f)['cad/widget/case-fit'], {'name': 'ケース改', 'id': 'sid-2'})
+
+    def test_owner_names(self):
+        owners = {'a': {'name': 'old', 'id': 's'}, 'b': {'name': 'new', 'id': 's'}, 'c': {'name': 'new', 'id': 's'},
+                  'd': {'name': 'x'}, 'e': {'name': 'y', 'id': ''}, 'f': {'id': 't'}}
+        self.assertEqual(tp.owner_names(owners), {'a': 'new', 'b': 'new', 'c': 'new', 'd': 'x', 'e': 'y', 'f': ''})
 
     def test_wait_json_and_pending_owner(self):
         page = 'review/index.html'
