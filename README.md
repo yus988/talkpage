@@ -156,6 +156,8 @@ talkpage serve <レポートの置き場> --reports --name notes.localhost
 
 **置き場の形**: root の下を辿り、`YYYYMMDD-HHMM-rN`（後ろに `-marks` のような一言が付いてもよい）のフォルダで `index.html` を持つものを「回」、その親のフォルダ（root からの相対パス。入れ子でよい）を「テーマ」とする。一覧には各テーマの最後の回だけを出す（前の回はテーマの `index.html` から辿る）。回の外の HTML は 1 つずつ「1 枚のページ」として出す（キーは、`index.html` ならそのフォルダ、ほかはファイルの相対パス）。`.` と `_` で始まるフォルダは見ない。
 
+**提出**: ほかの人に渡すまとめのページ（1 枚のページ）は、`<head>` に根拠にした作業用のレポートを書くと「提出」になる: `<meta name="report-basis" content="<テーマ>/<回> <テーマ> …">`（空白で区切る。回を省くとそのテーマの最新の回。`--place` では、同じフォルダのテーマを先に探し、ほかのフォルダのテーマは `<id>/<テーマ>`）。一覧とサイドバーでは、提出は「提出」の印の付いたフォルダになり、根拠のレポートがその中に並ぶ（GitHub のリリースのように、提出までの作業を 1 つにまとめる）。同じ担当（`--place` では同じ見出しの場所も）の根拠はフォルダの中だけに移り、ほかの担当の根拠は自分の担当の欄に残ったまま、フォルダの中にもその担当の名前付きで出る。書いた回より新しい回があれば「提出は r2」のように出る。見つからない語は一覧と `reports list` に出す。meta を直すと、次に一覧を読んだときから変わる。
+
 **配り方**: root の下の HTML を返す時に、`talkpage.css` と `talkpage.js`（`data-talk-report` 付き）を `</body>` の前に足す（応答の中だけで、ファイルは変えない。talkpage.js を自分で読み込むページには足さない）。表示の幅の指定（`<meta name="viewport">`）が無いページには、それも足す（無いと、スマホは画面より広く並べ、横に動いてしまう）。root に `index.html` が無ければ、`/` はレポートの一覧のページになる。
 
 **複数のフォルダ（`--place`）**: いくつもの workspace のレポートを、1 つのサーバーと 1 つの一覧で読む。ファイルは今の場所のまま、サーバーに置き場所を登録する。
@@ -199,7 +201,7 @@ talkpage serve --reports --place "sdk-workspace:notes=C:/ws-a/dev-notes" --place
 
 | | |
 |---|---|
-| `talkpage reports` / `reports list` | 未読（古い順）・既読・1 枚のページを `テーマ<TAB>回<TAB>担当<TAB>題` で出す。答えていないコメントは ` [comments: C1,C2]`、タブで開いているものは ` [open]` |
+| `talkpage reports` / `reports list` | 未読（古い順）・既読・1 枚のページを `テーマ<TAB>回<TAB>担当<TAB>題` で出す。提出は ` [submission; basis: テーマ, …]`、答えていないコメントは ` [comments: C1,C2]`、タブで開いているものは ` [open]`。最後に、提出の meta の見つからない語を `basis not found …` の行で出す |
 | `reports owner <テーマ> <名前> <id>` | そのテーマの担当（レポートを書いたセッションの名前と id）を `<root>/owners.json` に書く（`--place` なら、テーマの頭の id のフォルダの `owners.json` に、id を除いたキーで）。同じ id のほかのテーマの名前も書き換える（セッションの名前を変えたとき）。一覧とサイドバーでは、名前は id ごとに揃える（多くのテーマに付いている名前） |
 | `reports read <テーマ>…` / `reports read all` / `reports unread <テーマ>…` | 最後の回の「読んだ」を付ける・外す |
 | `reports open [--owner 文字]` | 未読のページを既定のブラウザで開く（タブで開いているものは除く）。`--owner` なら担当の名前にその文字を含むテーマを、既読も含めて開く |
@@ -244,7 +246,7 @@ talkpage serve --reports --place "sdk-workspace:notes=C:/ws-a/dev-notes" --place
 |---|---|
 | `GET /_talk/api/info` | root（`--place` なら `places: [{id, group, root}]`）、ポート、エージェントの状態（`listening` / `working` / `absent`）、状態のあるページ、`name`・`url`（ユーザーが読むアドレス。`--tailscale` なら tailnet のアドレス）・`local_url`（この PC だけのアドレス）、`open`（90 秒以内に `state` を `open=1` 付きで聞いたページ = ブラウザのタブで開いているページ） |
 | `GET /_talk/api/state?page=P` | ページの全項目。`&rev=N&wait=25`（と `&presence=…`）を付けると、版（とエージェントの状態）が変わるまで最大その秒数待つ。`&open=1` でそのページを「開いている」とする |
-| `GET /_talk/api/reports` | `--reports` のときだけ。レポートの一覧 `{root, url, places, rows: [{page, theme, round, title, owner, owner_id, tracked, status, read, comments, time, lang, place, group, star, tags, hidden}]}`（新しい順） |
+| `GET /_talk/api/reports` | `--reports` のときだけ。レポートの一覧 `{root, url, places, rows: [{page, theme, round, title, owner, owner_id, tracked, status, read, comments, time, lang, place, group, star, tags, hidden, submission}]}`（新しい順）。提出の行には `basis`（根拠のテーマ）・`basis_rounds`（書かれた回 `{テーマ: 回}`）・`basis_missing`（見つからない語）、根拠にされたテーマの行には `in`（それを挙げた提出のテーマ） |
 | `POST /_talk/api/mark` `{page, star?, tags?, hidden?}` | `--reports` のときだけ。一覧のスター（`true` / `false`）、タグ（文字列の配列。`[]` で外す）、非表示（`true` / `false`）。省いたものはそのまま |
 | `GET /_talk/api/pending[?page=P]` | エージェント未読の項目と、各項目の新しいユーザーの操作（`new`）。`wait` の内部で `&wait=50&listen=1`（待っている間は「受付中」、出したものは再び出さない）と `&take=1` を使う |
 | `POST /_talk/api/user` `{page, id, title?, status?, comment?, notify?, anchor?}` | ユーザーの操作（ページが送る）。`status: ""` で解除、`notify: false` でエージェントを起こさない。`title` か `anchor` だけなら残すだけで、エージェントを起こさない |

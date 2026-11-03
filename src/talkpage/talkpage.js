@@ -85,6 +85,11 @@
       'sb.unread': 'unread {n}',
       'sb.new': 'New',
       'sb.notoc': 'No headings',
+      'sb.submission': 'Submission',
+      'sb.basis': 'Show or hide the work reports it is based on',
+      'sb.based': 'submitted with {r}',
+      'sb.nobasis': 'No report of its basis is found',
+      'sb.missing': 'Not found: {x}',
       'read.title': 'Did you read this report',
       'read.note': 'Press Read when you are done. Select text in the report to comment on it.',
       'read.states': 'Read:ok,Again:ask'
@@ -158,6 +163,11 @@
       'sb.unread': '未読 {n}',
       'sb.new': '新',
       'sb.notoc': '見出しなし',
+      'sb.submission': '提出',
+      'sb.basis': '根拠にした作業用のレポートの表示の切り替え',
+      'sb.based': '提出は {r}',
+      'sb.nobasis': '根拠のレポートが見つからない',
+      'sb.missing': '見つからない根拠: {x}',
       'read.title': 'このレポートを読んだか',
       'read.note': '読み終えたら『読んだ』。本文の文字を選ぶとコメントできます。',
       'read.states': '読んだ:ok,もう一度:ask'
@@ -1596,7 +1606,8 @@
   // only when they do not fit (the whole title in the tooltip). A title that ends with its round and time ("… r3 10-29
   // 15:50") is shown without them, as they follow anyway
   var WHEN_RE = /\s+r\d+\s+\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2}$/;
-  function reportRow(r) {
+  // sub: the submission whose folder the row is in, ref: the name of the group the row stays in as well (another owner's)
+  function reportRow(r, sub, ref) {
     var a = el('a', 'talk-sb-row'), txt = el('span', 'talk-sb-text'), title = r.title || r.theme || r.page;
     var rn = /-(r\d+)/.exec(r.round || '');
     a.href = '/' + r.page.split('/').map(encodeURIComponent).join('/');
@@ -1607,22 +1618,65 @@
     var when = [rn && rn[1], (r.time || '').slice(5)].filter(Boolean).join(' ');
     if (when) txt.appendChild(el('span', 'talk-sb-meta', when));
     if (!reportsFirst[r.page]) txt.appendChild(el('span', 'talk-sb-new', tr('sb.new')));
+    var br = sub && (sub.basis_rounds || {})[r.theme], brn = br && /-(r\d+)/.exec(br);
+    if (br && br !== r.round) {                             // a newer round since the submission was based on it
+      txt.appendChild(el('span', 'talk-sb-note', tr('sb.based', { r: brn ? brn[1] : br })));
+    }
+    if (ref) txt.appendChild(el('span', 'talk-sb-note talk-sb-other', ref));
     a.appendChild(txt);
     return a;
   }
 
+  // a submission (a page with <meta name="report-basis">): a folder like a release, the page's own row with a mark and
+  // a button that shows the work reports it is based on (closed at first, unless this page is one of them)
+  function subFolder(s, kids, own, ref) {
+    var box = el('div', 'talk-sb-sub'), head = el('div', 'talk-sb-subhead'), body = el('div', 'talk-sb-subbody');
+    var open = button('talk-sb-open', '');
+    open.title = tr('sb.basis');
+    open.setAttribute('aria-label', tr('sb.basis'));
+    head.appendChild(open);
+    head.appendChild(el('span', 'talk-sb-tag', tr('sb.submission')));
+    head.appendChild(reportRow(s));
+    var n = kids.filter(isUnread).length;
+    if (n) head.appendChild(el('span', 'talk-sb-gunread', tr('sb.unread', { n: n })));
+    if (s.page === page) head.classList.add('talk-here');
+    kids.forEach(function (k) { body.appendChild(reportRow(k, s, own(k) ? '' : ref(k))); });
+    if (!kids.length) body.appendChild(el('p', 'talk-sb-empty', tr('sb.nobasis')));
+    if ((s.basis_missing || []).length) {
+      body.appendChild(el('p', 'talk-sb-empty', tr('sb.missing', { x: s.basis_missing.join(', ') })));
+    }
+    var key = 'sub:' + s.page, inside = kids.some(function (k) { return k.page === page; });
+    function shut() { return key in sb.fold ? !!sb.fold[key] : !inside; }
+    function paint() { var x = shut(); body.hidden = x; open.setAttribute('aria-expanded', String(!x)); }
+    open.addEventListener('click', function () { sb.fold[key] = shut() ? 0 : 1; savePrefs(); paint(); });
+    paint();
+    box.appendChild(head);
+    box.appendChild(body);
+    return box;
+  }
+
   // the reports by place (a server of several folders) or by owner; unread ones bold, ones added since this page opened
-  // marked new, this page marked; the ones hidden in the list left out (but this page)
+  // marked new, this page marked; the ones hidden in the list left out (but this page). A submission comes first in
+  // its group as a folder: the reports it is based on of the same owner (and group) move into it, another owner's stay
+  // in their own group and appear in the folder too, with that owner's name
   function renderReports(rows) {
     rows = rows.filter(function (r) { return !r.hidden || r.page === page; });
     if (!reportsFirst) {
       reportsFirst = {};
       rows.forEach(function (r) { reportsFirst[r.page] = true; });
     }
-    var groups = [], by = {}, keep = rp.body.scrollTop;
+    var groups = [], by = {}, keep = rp.body.scrollTop, byTheme = {}, moved = {};
     var byPlace = rows.some(function (r) { return r.group; });
+    function gkey(r) { return (byPlace ? r.group : r.owner) || ''; }
+    rows.forEach(function (r) { if (r.tracked) byTheme[r.theme] = r; });
+    function kidsOf(s) { return (s.basis || []).map(function (t) { return byTheme[t]; }).filter(Boolean); }
+    rows.forEach(function (s) {
+      if (!s.submission) return;
+      kidsOf(s).forEach(function (k) { if (k.owner === s.owner && gkey(k) === gkey(s)) moved[k.page] = true; });
+    });
     rows.forEach(function (r) {
-      var name = (byPlace ? r.group : r.owner) || '';
+      if (moved[r.page]) return;                            // in its submission's folder
+      var name = gkey(r);
       if (!by[name]) { by[name] = []; groups.push(name); }
       by[name].push(r);
     });
@@ -1633,7 +1687,12 @@
       rp.body.appendChild(all);
     }
     groups.forEach(function (name) {
-      var rs = by[name], n = rs.filter(isUnread).length, key = (byPlace ? 'place:' : 'owner:') + name;
+      var rs = by[name], unread = {}, key = (byPlace ? 'place:' : 'owner:') + name;
+      rs.forEach(function (r) {                             // the group's own rows and its submissions' moved ones
+        (r.submission ? kidsOf(r).filter(function (k) { return moved[k.page]; }) : [r])
+          .forEach(function (k) { if (isUnread(k) && gkey(k) === name) unread[k.page] = true; });
+      });
+      var n = Object.keys(unread).length;
       var g = el('div', 'talk-sb-group');
       var head = button('talk-sb-ghead', '');
       head.appendChild(el('span', 'talk-sb-gname', name || tr('sb.noowner')));
@@ -1641,7 +1700,12 @@
       var list = el('div', 'talk-sb-rows');
       head.addEventListener('click', function () { toggleFold(key, head, list); });
       paintFold(key, head, list);
-      rs.forEach(function (r) { list.appendChild(reportRow(r)); });
+      rs.filter(function (r) { return r.submission; }).concat(rs.filter(function (r) { return !r.submission; }))
+        .forEach(function (r) {
+          if (!r.submission) { list.appendChild(reportRow(r)); return; }
+          list.appendChild(subFolder(r, kidsOf(r), function (k) { return k.owner === r.owner && gkey(k) === gkey(r); },
+                                     function (k) { return k.owner !== r.owner ? k.owner || tr('sb.noowner') : gkey(k); }));
+        });
       g.appendChild(head);
       g.appendChild(list);
       rp.body.appendChild(g);

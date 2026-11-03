@@ -224,6 +224,15 @@ talkpage serve <reports folder> --reports --name notes.localhost
 round of each theme (the earlier ones are linked from the theme's `index.html`). Every other HTML file is a single
 page (key: its folder for an `index.html`, else its path). Folders starting with `.` or `_` are skipped.
 
+**Submissions**: a summary page handed in to others (a single page) becomes a submission when its `<head>` names the
+work reports it is based on: `<meta name="report-basis" content="<theme>/<round> <theme> …">` (separated by spaces; a
+theme without a round means its newest round; under `--place` a theme of the same folder is looked for first, another
+folder's is `<id>/<theme>`). In the list and the sidebar a submission is a folder marked "Submission" with its basis
+reports inside, like a release that gathers the work leading to it. Basis reports of the same owner (and, under
+`--place`, the same heading) move into the folder; another owner's stay in their own group and appear in the folder
+too, with that owner's name. A newer round than the one named shows as "submitted with r2". Words that name no theme
+are shown in the list and by `reports list`. A changed meta shows the next time the list is read.
+
 **Serving**: an HTML page under the root gets `talkpage.css` and `talkpage.js` (with `data-talk-report`) before
 `</body>` in the response; the file is not changed, and a page that loads talkpage.js itself is left as it is. A page
 without `<meta name="viewport">` gets one too (without it a phone lays the page out wider than the screen and it slides
@@ -305,7 +314,7 @@ sidebar marks starred rows with ★; under `--place` it groups the reports by he
 
 | | |
 |---|---|
-| `talkpage reports` / `reports list` | unread (oldest first), read and single pages as `theme<TAB>round<TAB>owner<TAB>title`, with ` [comments: C1,C2]` for unanswered comments and ` [open]` for pages open in a tab |
+| `talkpage reports` / `reports list` | unread (oldest first), read and single pages as `theme<TAB>round<TAB>owner<TAB>title`, with ` [submission; basis: theme, …]` for a submission, ` [comments: C1,C2]` for unanswered comments and ` [open]` for pages open in a tab; then a `basis not found …` line for words of report-basis that name no theme |
 | `reports owner <theme> <name> <id>` | write the theme's owner (the name and id of the session that wrote it) to `<root>/owners.json` (under `--place`: to the `owners.json` of the folder whose id starts the theme, keyed without the id); the other themes with the same id take the name too (a renamed session). The list and the sidebars show one name per id (the one most of its themes carry) |
 | `reports read <theme>…` / `reports read all` / `reports unread <theme>…` | set or clear "Read" on the last round |
 | `reports open [--owner text]` | open the unread pages in the default browser (not those already open in a tab); with `--owner`, the themes whose owner contains the text, read or not |
@@ -359,7 +368,7 @@ send `Origin: http://127.0.0.1:<port>` (see "Safety").
 |---|---|
 | `GET /_talk/api/info` | root (under `--place`: `places: [{id, group, root}]`), port, the agent's state (`listening` / `working` / `absent`), pages with a state, `name`, `url` (where the user reads; the tailnet address with `--tailscale`), `local_url` (this PC's own address), `open` (pages that asked `state` with `open=1` in the last 90 s, i.e. open in a browser tab) |
 | `GET /_talk/api/state?page=P` | All items of a page. With `&rev=N&wait=25` (and `&presence=…`) it waits up to that many seconds for the revision (or the agent's state) to change. `&open=1` counts the page as open |
-| `GET /_talk/api/reports` | Under `--reports` only: `{root, url, places, rows: [{page, theme, round, title, owner, owner_id, tracked, status, read, comments, time, lang, place, group, star, tags, hidden}]}`, newest first |
+| `GET /_talk/api/reports` | Under `--reports` only: `{root, url, places, rows: [{page, theme, round, title, owner, owner_id, tracked, status, read, comments, time, lang, place, group, star, tags, hidden, submission}]}`, newest first. A submission's row has `basis` (the themes), `basis_rounds` (the rounds named, `{theme: round}`) and `basis_missing` (words naming no theme); a basis theme's row has `in` (the submissions naming it) |
 | `POST /_talk/api/mark` `{page, star?, tags?, hidden?}` | Under `--reports` only: the star (`true` / `false`), the tags (a list of strings; `[]` removes them) and hidden (`true` / `false`) of the list; what is left out stays |
 | `GET /_talk/api/pending[?page=P]` | Items unread by the agent and each one's new user actions (`new`). `wait` uses `&wait=50&listen=1` (shows "listening" meanwhile; what it printed is not printed again) and `&take=1` |
 | `POST /_talk/api/user` `{page, id, title?, status?, comment?, notify?, anchor?}` | A user action (sent by the page). `status: ""` clears; `notify: false` does not wake the agent; a `title` or an `anchor` alone is kept without waking it |

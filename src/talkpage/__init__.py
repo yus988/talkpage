@@ -70,6 +70,8 @@ FOUND_SECONDS = 5                                               # the walk of th
 ROUND_RE = re.compile(r'^\d{8}-\d{4}-r\d+(-[^/]+)?$')      # a round <theme>/<round>/index.html (also r27-marks)
 TITLE_RE = re.compile(rb'<title[^>]*>(.*?)</title', re.I | re.S)
 LANG_RE = re.compile(rb'<html[^>]*?\slang\s*=\s*["\']?([A-Za-z-]+)', re.I)
+META_RE = re.compile(rb'<meta\b[^>]*>', re.I)
+ATTR_RE = re.compile(rb'''([A-Za-z][\w:-]*)\s*=\s*("[^"]*"|'[^']*'|[^\s"'>]+)''')
 READ = ('読んだ', 'Read')                                       # the statuses of the item `read` that mean read
 OPEN_SECONDS = 90                                               # a page asked with open=1 this recently is open
 # added to the report pages the server hands out (--reports); fixed, nothing of the page or the user goes in
@@ -95,7 +97,8 @@ REPORTS = {
            'mark_read': 'Mark read', 'mark_unread': 'Unread', 'star': 'Look again later', 'tags': 'Tags',
            'tag_prompt': 'Tags, separated by commas (empty removes them)', 'count': '%d', 'failed': 'Not saved',
            'archived': 'Hidden', 'hide': 'Hide', 'unhide': 'Show', 'hide_title': 'Hide from the list (the page stays)',
-           'unhide_title': 'Back to the list'},
+           'unhide_title': 'Back to the list', 'submission': 'Submission', 'based': 'submitted with %s',
+           'missing': 'not found: %s', 'submission_title': 'Handed in; the work reports it is based on follow it'},
     'ja': {'title': 'レポートの一覧', 'unread': '未読', 'comments': 'コメント %s', 'none': '（まだ無い）',
            'no_owner': '担当なし', 'meta': 'root: %s ・ 状態のあるページの一覧: <a href="/_talk/">/_talk/</a>',
            'all': 'すべて', 'only_unread': '未読', 'starred': '★ あとで', 'by_place': '場所ごと', 'by_time': '新しい順',
@@ -103,14 +106,17 @@ REPORTS = {
            'mark_read': '既読に', 'mark_unread': '未読に', 'star': 'あとでもう一度見る', 'tags': 'タグ',
            'tag_prompt': 'タグ（カンマか読点で区切る。空にすると外す）', 'count': '%d 件', 'failed': '保存できませんでした',
            'archived': '非表示', 'hide': '非表示', 'unhide': '再表示', 'hide_title': '一覧から隠す（ページは残る）',
-           'unhide_title': '一覧に戻す'},
+           'unhide_title': '一覧に戻す', 'submission': '提出', 'based': '提出は %s', 'missing': '見つからない根拠: %s',
+           'submission_title': '提出したページ。根拠にした作業用のレポートがその下に並ぶ'},
 }
 FAVICON = ("<link rel=\"icon\" href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>"
            "<text y='.9em' font-size='90'>💬</text></svg>\">")
 # the list of reports (report_listing): the rows come in as JSON and the script draws them (textContent only). By place
 # (a heading per group, folded by a tap) or newest first; all / unread / starred / a tag; a star, the tags and "read"
 # are set by the buttons of a row; "hide" takes a row out of the list (and the sidebars) until it is shown again from
-# the filter "hidden". The view, the filter and the folds stay in localStorage
+# the filter "hidden". The view, the filter and the folds stay in localStorage. A submission (a page with <meta
+# name="report-basis">) is marked so and the work reports it is based on follow it, indented: those of its owner (and
+# place) only there, another owner's also in their own place, with that owner's name
 LISTING_PAGE = r'''<!doctype html><html lang="{{LANG}}"><head><meta charset="utf-8">{{VIEWPORT}}<title>{{TITLE}}</title>
 {{FAVICON}}<style>
 :root{color-scheme:light dark;--line:#8884;--dim:#777;--link:#0a5fb4;--red:#cf222e;--amber:#b45309;--chip:#8881}
@@ -138,6 +144,10 @@ li a:hover .t{text-decoration:underline}.t{font-weight:600;color:var(--link)}
 .ghead::before{content:"▾";width:1em}.ghead[aria-expanded=false]::before{content:"▸"}
 .ghead .n{font-weight:400;font-size:13px;color:var(--dim)}.ghead .u{margin-left:0}
 .none{color:var(--dim)}
+.sub{margin-right:8px;padding:0 5px;font-size:12px;font-weight:700;color:var(--link);border:1px solid var(--link);border-radius:4px}
+li.kid{margin-left:22px;padding-left:8px;border-left:1px solid var(--line)}
+.note{margin-left:8px;font-size:12px;color:var(--dim)}.ref{margin-left:8px;font-size:12px;border:1px solid var(--line);
+  border-radius:4px;padding:0 4px}
 @media (max-width:599px){li{flex-wrap:wrap;gap:0}li a{flex-basis:100%;padding-bottom:4px}
   .acts{flex:1;justify-content:flex-end;padding:0 0 8px}.flash{top:auto;bottom:44px}}
 </style></head>
@@ -223,10 +233,36 @@ li a:hover .t{text-decoration:underline}.t{font-weight:600;color:var(--link)}
       .then(function (d) { done(d); draw(); })
       .catch(function () { btn.disabled = false; flash(btn, M.failed); });
   }
-  function row(r, withGroup) {
+  // a submission's own reports: the same owner in the same place
+  function own(s, k) { return k.owner === s.owner && k.group === s.group; }
+  function folders() {
+    var byTheme = {}, moved = {};
+    D.rows.forEach(function (r) { if (r.tracked && !r.hidden) byTheme[r.theme] = r; });
+    function kids(s) { return (s.basis || []).map(function (t) { return byTheme[t]; }).filter(Boolean); }
+    D.rows.forEach(function (s) {
+      if (s.submission && !s.hidden) kids(s).forEach(function (k) { if (own(s, k)) moved[k.page] = 1; });
+    });
+    return { kids: kids, moved: moved };
+  }
+  // sub: the submission the row follows (one of the reports it is based on)
+  function row(r, withGroup, sub) {
     var li = el('li'), a = el('a');
     a.href = href(r);
+    if (r.submission) {
+      var mk = el('span', 'sub', M.submission);
+      mk.title = M.submission_title;
+      a.appendChild(mk);
+    }
     a.appendChild(el('span', 't', r.title));
+    if (sub) {
+      li.className = 'kid';
+      var br = (sub.basis_rounds || {})[r.theme], rn = br && /-(r\d+)/.exec(br);
+      if (br && br !== r.round) a.appendChild(el('span', 'note', M.based.replace('%s', rn ? rn[1] : br)));
+      if (!own(sub, r)) a.appendChild(el('span', 'ref', r.owner !== sub.owner ? r.owner || M.no_owner : r.group));
+    }
+    if (r.submission && r.basis_missing.length) {
+      a.appendChild(el('span', 'note', M.missing.replace('%s', r.basis_missing.join(', '))));
+    }
     if (unread(r)) a.appendChild(el('b', 'u', M.unread));
     if (r.comments.length) a.appendChild(el('span', 'c', M.comments.replace('%s', r.comments.join(', '))));
     a.appendChild(el('span', 'm', [withGroup ? r.group : '', theme(r), r.round, r.owner || M.no_owner, r.time]
@@ -280,28 +316,43 @@ li a:hover .t{text-decoration:underline}.t{font-weight:600;color:var(--link)}
         S.filter === 'hidden' && !D.rows.some(function (r) { return r.hidden; })) S.filter = 'all';
     drawBar(tags);
     list.textContent = '';
-    var rows = D.rows.filter(match), ul;
-    if (!rows.length) { list.appendChild(el('p', 'none', M.none)); return; }
+    // the rows to show, each with the reports it is based on (a submission); a submission also shows for its matching
+    // reports (unread ones, say), and comes first in its place (not among the newest first)
+    var f = S.filter === 'hidden' ? { kids: function () { return []; }, moved: {} } : folders(), items = [], ul;
+    D.rows.forEach(function (r) {
+      if (f.moved[r.page]) return;
+      var ks = r.submission && !r.hidden ? f.kids(r).filter(match) : [];
+      if (match(r) || ks.length) items.push({ r: r, kids: ks });
+    });
+    if (!items.length) { list.appendChild(el('p', 'none', M.none)); return; }
+    if (S.view !== 'time') {
+      items = items.filter(function (x) { return x.r.submission; }).concat(items.filter(function (x) { return !x.r.submission; }));
+    }
+    function put(ul, x, withGroup) {
+      ul.appendChild(row(x.r, withGroup));
+      x.kids.forEach(function (k) { ul.appendChild(row(k, withGroup, x.r)); });
+    }
     if (S.view === 'time' || !D.multi) {
       ul = el('ul');
-      rows.forEach(function (r) { ul.appendChild(row(r, D.multi)); });
+      items.forEach(function (x) { put(ul, x, D.multi); });
       list.appendChild(ul);
       return;
     }
     var groups = [], by = {};
     function add(g) { if (!by[g]) { by[g] = []; groups.push(g); } }
     D.places.forEach(function (p) { add(p.group); });
-    rows.forEach(function (r) { add(r.group); by[r.group].push(r); });
+    items.forEach(function (x) { add(x.r.group); by[x.r.group].push(x); });
     groups.forEach(function (g) {
       var rs = by[g];
       if (!rs.length) return;
-      var sec = el('section', 'group'), head = el('button', 'ghead'), n = rs.filter(unread).length;
+      var all = [].concat.apply([], rs.map(function (x) { return [x.r].concat(x.kids); }));
+      var sec = el('section', 'group'), head = el('button', 'ghead'), n = all.filter(unread).length;
       sec.setAttribute('data-group', g);
       head.appendChild(el('span', '', g));
-      head.appendChild(el('span', 'n', M.count.replace('%d', rs.length)));
+      head.appendChild(el('span', 'n', M.count.replace('%d', all.length)));
       if (n) head.appendChild(el('span', 'u', M.unread + ' ' + n));
       ul = el('ul');
-      rs.forEach(function (r) { ul.appendChild(row(r, false)); });
+      rs.forEach(function (x) { put(ul, x, false); });
       ul.hidden = !!S.fold[g];
       head.setAttribute('aria-expanded', String(!S.fold[g]));
       head.addEventListener('click', function () {
@@ -431,6 +482,25 @@ def page_title(data):
 def page_lang(data):
     m = LANG_RE.search(data)
     return m.group(1).decode('ascii').lower() if m else ''
+
+
+def page_basis(data):
+    """A submission's basis: the words of <meta name="report-basis" content="<theme>/<round> <theme> …">, or None for
+    a page without it."""
+    for m in META_RE.finditer(data):
+        a = {k.lower(): v.strip(b'"\'') for k, v in ATTR_RE.findall(m.group(0))}
+        if a.get(b'name', b'').lower() == b'report-basis':
+            return html.unescape(a.get(b'content', b'').decode('utf-8', 'replace')).split()
+    return None
+
+
+def basis_word(word):
+    """(theme, round or '') of a word of report-basis: a round named after the theme's path, or the theme alone."""
+    parts = [x for x in word.split('/') if x]
+    for i, x in enumerate(parts):
+        if i and ROUND_RE.match(x):
+            return '/'.join(parts[:i]), x
+    return '/'.join(parts), ''
 
 
 def report_key(page):
@@ -837,6 +907,7 @@ class Talk:
         self.fallback = fallback if self.multi else None
         self.marks_path = marks or os.path.join(os.path.expanduser('~'), '.talkpage', 'marks-%d.json' % port)
         self._found = (0.0, None)              # (when, the walk of reports())
+        self._info = {}                        # file -> page_info()
         self.port = port
         self.lang = lang if lang in LANGS else 'en'      # of the index page; the pages carry their own <html lang>
         self.name = name or None                         # --name, checked by check_name()
@@ -925,8 +996,8 @@ class Talk:
         return {'page': p, 'star': bool(m.get('star')), 'tags': m.get('tags') or [], 'hidden': bool(m.get('hidden'))}
 
     def walk_reports(self):
-        """(theme, round, page, file, time, title, lang, place) of each report: the last round of each theme with
-        rounds, and the single pages. The walk is reused for FOUND_SECONDS (the pages' sidebars ask every 30 s)."""
+        """(theme, round, page, file, place) of each report: the last round of each theme with rounds, and the single
+        pages. The walk is reused for FOUND_SECONDS (the pages' sidebars ask every 30 s)."""
         when, found = self._found
         if found is not None and time.time() - when < FOUND_SECONDS:
             return found
@@ -939,34 +1010,46 @@ class Talk:
                 rounds = [x for x in dirs if ROUND_RE.match(x) and os.path.isfile(os.path.join(d, x, 'index.html'))]
                 if rounds and (rel or pl.id):  # a theme: its last round; the earlier ones are linked from its index
                     r = max(rounds, key=natural)   # (a place's own rounds: the place is the theme)
-                    full = os.path.join(d, r, 'index.html')
-                    data = head(full)
-                    found.append((pl.key(rel), r, pl.key('/'.join(x for x in (rel, r, 'index.html') if x)), full,
-                                  '%s-%s-%s %s:%s' % (r[:4], r[4:6], r[6:8], r[9:11], r[11:13]),
-                                  page_title(data), page_lang(data), pl))
+                    found.append((pl.key(rel), r, pl.key('/'.join(x for x in (rel, r, 'index.html') if x)),
+                                  os.path.join(d, r, 'index.html'), pl))
                 dirs[:] = [x for x in dirs if not ROUND_RE.match(x)]     # the other files of a round are not rows
                 for f in sorted(files):
                     if not f.lower().endswith(('.html', '.htm')) or f == 'index.html' and (rounds or not rel):
                         continue               # the index of the rounds, and the place's own index
                     page = pl.key(rel + '/' + f if rel else f)
-                    full = os.path.join(d, f)
-                    try:
-                        t = time.strftime('%Y-%m-%d %H:%M', time.localtime(os.path.getmtime(full)))
-                    except OSError:
-                        continue
-                    data = head(full)
-                    found.append((report_key(page), '', page, full, t, page_title(data), page_lang(data), pl))
+                    found.append((report_key(page), '', page, os.path.join(d, f), pl))
         self._found = (time.time(), found)
         return found
 
+    def page_info(self, full):
+        """(mtime, title, lang, report-basis) of a page's file, read again whenever it changed (a fixed title or basis
+        shows on the next request, not after the walk's FOUND_SECONDS); None when it is gone."""
+        try:
+            mt = os.path.getmtime(full)
+        except OSError:
+            return None
+        hit = self._info.get(full)
+        if hit is None or hit[0] != mt:
+            data = head(full)
+            hit = self._info[full] = (mt, page_title(data), page_lang(data), page_basis(data))
+        return hit
+
     def reports(self):
-        """The reports under the places, newest first."""
+        """The reports under the places, newest first. A single page with <meta name="report-basis"> is a submission:
+        basis (the themes found, in order), basis_rounds (the round named for a theme), basis_missing (words that name
+        no theme with rounds); the rows of those themes carry in (the submissions that name them)."""
         found = self.walk_reports()
         owners, marks = self.owners(), self.marks()
         names = owner_names(owners)
         rows = []
         with self.cond:
-            for theme, r, page, full, t, title, lang, pl in found:
+            for theme, r, page, full, pl in found:
+                info = self.page_info(full)
+                if info is None:
+                    continue
+                mt, title, lang, basis = info
+                t = ('%s-%s-%s %s:%s' % (r[:4], r[4:6], r[6:8], r[9:11], r[11:13]) if r
+                     else time.strftime('%Y-%m-%d %H:%M', time.localtime(mt)))
                 s = self.stores.get(page)
                 if s is None and os.path.isfile(os.path.splitext(full)[0] + '.talk.json'):
                     try:
@@ -987,7 +1070,25 @@ class Talk:
                              'status': read if r else '-', 'read': bool(r) and read in READ,
                              'comments': comments, 'time': t, 'lang': lang, 'place': pl.id, 'group': pl.group,
                              'star': mk.get('star') is True, 'tags': [x for x in tags if isinstance(x, str)],
-                             'hidden': mk.get('hidden') is True})
+                             'hidden': mk.get('hidden') is True, 'submission': not r and basis is not None,
+                             'basis': basis if not r else None})
+        themes = {x['theme']: x for x in rows if x['tracked']}
+        for x in rows:                         # the basis of each submission: themes of its place first, then any
+            words = x.pop('basis')
+            if not x['submission']:
+                continue
+            x['basis'], x['basis_rounds'], x['basis_missing'] = [], {}, []
+            for w in words:
+                name, rnd = basis_word(w)
+                key = next((k for k in ([x['place'] + '/' + name] if x['place'] else []) + [name] if k in themes), None)
+                if key is None:
+                    x['basis_missing'].append(w)
+                    continue
+                if key not in x['basis']:
+                    x['basis'].append(key)
+                    themes[key].setdefault('in', []).append(x['theme'])
+                if rnd:
+                    x['basis_rounds'][key] = rnd
         rows.sort(key=lambda x: x['time'], reverse=True)
         return {'root': self.root and self.root.replace('\\', '/'), 'url': self.url, 'rows': rows,
                 'places': self.place_list()}
@@ -1619,6 +1720,8 @@ def reports_data(a):
 
 def report_line(x, opened):
     line = '\t'.join((x['theme'], x['round'] or '-', x['owner'] or '-', x['title']))
+    if x.get('submission'):
+        line += ' [submission; basis: %s]' % (', '.join(x['basis']) or '-')
     if x['comments']:
         line += ' [comments: %s]' % ','.join(x['comments'])
     return line + (' [open]' if x['page'] in opened else '')
@@ -1651,6 +1754,9 @@ def cmd_reports(a):
             print('== %s: %d' % (label, len(xs)))
             for x in xs:
                 print(report_line(x, opened))
+        missing = ['%s: %s' % (x['page'], w) for x in rows for w in x.get('basis_missing') or []]
+        if missing:
+            print('basis not found (report-basis; a theme with rounds, or <theme>/<round>): ' + ', '.join(missing))
     elif act == 'owner':
         if len(args) != 3:
             raise SystemExit('talkpage: reports owner <theme> <name> <id>')

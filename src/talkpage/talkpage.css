@@ -236,6 +236,26 @@ body { padding-bottom: 64px; }
 .talk-sb-row.talk-unread .talk-sb-t::before { content: "\25CF  "; color: var(--talk-accent); }
 .talk-sb-row.talk-here, .talk-toc.talk-here { background: var(--talk-agent-bg); color: var(--talk-accent); }
 .talk-sb-new { flex: none; padding: 0 5px; font-size: 10px; font-weight: 700; color: #fff; background: var(--talk-ng); border-radius: 8px; }
+/* a submission: [▸] Submission title — the button shows the reports it is based on, the title opens the page */
+.talk-sb-subhead { display: flex; align-items: center; gap: 4px; padding-left: 2px; border-radius: 4px; }
+.talk-sb-subhead.talk-here { background: var(--talk-agent-bg); }
+.talk-sb-subhead .talk-sb-row { flex: 1; min-width: 0; padding-left: 2px; }
+.talk-sb-subhead .talk-sb-gunread { flex: none; white-space: nowrap; padding-right: 4px; }
+.talk-sb-open {
+  flex: none; width: 20px; height: 20px; padding: 0; font: inherit; font-size: 11px; line-height: 18px; color: var(--talk-muted);
+  background: none; border: 1px solid var(--talk-line); border-radius: 4px; cursor: pointer;
+}
+.talk-sb-open:hover { color: var(--talk-fg); border-color: var(--talk-muted); }
+.talk-sb-open::before { content: "\25BE"; }
+.talk-sb-open[aria-expanded="false"]::before { content: "\25B8"; }
+.talk-sb-tag {
+  flex: none; padding: 0 4px; font-size: 11px; font-weight: 700; line-height: 1.5; color: var(--talk-accent);
+  border: 1px solid var(--talk-accent); border-radius: 3px;
+}
+.talk-sb-subbody { margin-left: 11px; padding-left: 2px; border-left: 1px solid var(--talk-line); }
+.talk-sb-subbody[hidden] { display: none; }
+.talk-sb-note { flex: none; font-size: 11px; color: var(--talk-muted); white-space: nowrap; }
+.talk-sb-other { padding: 0 4px; border: 1px solid var(--talk-line); border-radius: 3px; }   /* another owner's report */
 .talk-toc { padding-left: 8px; }
 .talk-toc-h2 { padding-left: 20px; }
 .talk-toc-h3 { padding-left: 32px; font-size: 12px; }

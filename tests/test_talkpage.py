@@ -478,6 +478,42 @@ class ReportsTest(unittest.TestCase):
                   'd': {'name': 'x'}, 'e': {'name': 'y', 'id': ''}, 'f': {'id': 't'}}
         self.assertEqual(tp.owner_names(owners), {'a': 'new', 'b': 'new', 'c': 'new', 'd': 'x', 'e': 'y', 'f': ''})
 
+    def test_submissions(self):
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root)
+        for p in ('grinder/20261028-1000-r1/index.html', 'grinder/20261029-1500-r2/index.html',
+                  'kettle/20261029-1200-r1/index.html', 'cad/case/20261025-0042-r1/index.html', 'notes.html'):
+            write(root, p, '<title>%s</title>' % p)
+        meta = '<head><title>plan</title><META content="%s" Name=report-basis></head>'
+        plan = write(root, 'plan/index.html', meta % 'grinder/20261028-1000-r1 kettle cad/case/20261025-0042-r1 nothing')
+        talk = tp.Talk(root, 0, reports=True)
+        rows = {x['page']: x for x in talk.reports()['rows']}
+        sub = rows['plan/index.html']
+        self.assertEqual((sub['submission'], sub['basis'], sub['basis_rounds'], sub['basis_missing']),
+                         (True, ['grinder', 'kettle', 'cad/case'], {'grinder': '20261028-1000-r1', 'cad/case': '20261025-0042-r1'},
+                          ['nothing']))
+        self.assertEqual(rows['grinder/20261029-1500-r2/index.html']['in'], ['plan'])     # the theme's last round
+        self.assertEqual((rows['notes.html']['submission'], 'basis' in rows['notes.html'], 'in' in rows['notes.html']),
+                         (False, False, False))
+        self.assertEqual(tp.report_line(sub, set()), 'plan\t-\t-\tplan [submission; basis: grinder, kettle, cad/case]')
+        # a changed meta shows on the next request (not after the walk's few seconds)
+        with open(plan, 'w', encoding='utf-8') as f:
+            f.write(meta % 'kettle')
+        t = time.time() + 5
+        os.utime(plan, (t, t))
+        sub = {x['page']: x for x in talk.reports()['rows']}['plan/index.html']
+        self.assertEqual((sub['basis'], sub['basis_rounds'], sub['basis_missing']), (['kettle'], {}, []))
+        self.assertEqual(tp.page_basis(b'<meta name="report-basis" content="">'), [])
+        self.assertIsNone(tp.page_basis(b'<meta name="description" content="report-basis">'))
+        # several places: a theme of the submission's own place first, another place's by its id
+        other = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, other)
+        write(other, 'grinder/20261030-0900-r1/index.html', '<title>b</title>')
+        write(other, 'sum.html', meta % 'grinder a/kettle')
+        talk = tp.Talk(places=[('', 'a', root), ('', 'b', other)], reports=True)
+        sub = {x['page']: x for x in talk.reports()['rows']}['b/sum.html']
+        self.assertEqual((sub['theme'], sub['basis']), ('b/sum.html', ['b/grinder', 'a/kettle']))
+
     def test_wait_json_and_pending_owner(self):
         page = 'review/index.html'
         self.cli('reports', 'owner', 'review', 'レビュー', 'sid-3')
