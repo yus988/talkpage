@@ -117,8 +117,8 @@ FAVICON = ("<link rel=\"icon\" href=\"data:image/svg+xml,<svg xmlns='http://www.
 # (a heading per group, folded by a tap) or newest first; all / unread / starred / a tag; a star, the tags and "read"
 # are set by the buttons of a row; "hide" takes a row out of the list (and the sidebars) until it is shown again from
 # the filter "hidden". The view, the filter and the folds stay in localStorage. A submission (a page with <meta
-# name="report-basis">) is marked so and the work reports it is based on follow it, indented: those of its owner (and
-# place) only there, another owner's also in their own place, with that owner's name
+# name="report-basis">) is marked so and the work reports of its owner (and place) it is based on follow it, indented,
+# and only there; another owner's stay in their own place alone (a report is listed under the one who wrote it)
 LISTING_PAGE = r'''<!doctype html><html lang="{{LANG}}"><head><meta charset="utf-8">{{VIEWPORT}}<title>{{TITLE}}</title>
 {{FAVICON}}<style>
 :root{color-scheme:light dark;--line:#8884;--dim:#777;--link:#0a5fb4;--red:#cf222e;--amber:#b45309;--chip:#8881}
@@ -148,8 +148,7 @@ li a:hover .t{text-decoration:underline}.t{font-weight:600;color:var(--link)}
 .none{color:var(--dim)}
 .sub{margin-right:8px;padding:0 5px;font-size:12px;font-weight:700;color:var(--link);border:1px solid var(--link);border-radius:4px}
 li.kid{margin-left:22px;padding-left:8px;border-left:1px solid var(--line)}
-.note{margin-left:8px;font-size:12px;color:var(--dim)}.ref{margin-left:8px;font-size:12px;border:1px solid var(--line);
-  border-radius:4px;padding:0 4px}
+.note{margin-left:8px;font-size:12px;color:var(--dim)}
 @media (max-width:599px){li{flex-wrap:wrap;gap:0}li a{flex-basis:100%;padding-bottom:4px}
   .acts{flex:1;justify-content:flex-end;padding:0 0 8px}.flash{top:auto;bottom:44px}}
 </style></head>
@@ -240,9 +239,11 @@ li.kid{margin-left:22px;padding-left:8px;border-left:1px solid var(--line)}
   function folders() {
     var byTheme = {}, moved = {};
     D.rows.forEach(function (r) { if (r.tracked && !r.hidden) byTheme[r.theme] = r; });
-    function kids(s) { return (s.basis || []).map(function (t) { return byTheme[t]; }).filter(Boolean); }
+    function kids(s) {                         // the basis of the submission's own owner and place
+      return (s.basis || []).map(function (t) { return byTheme[t]; }).filter(function (k) { return k && own(s, k); });
+    }
     D.rows.forEach(function (s) {
-      if (s.submission && !s.hidden) kids(s).forEach(function (k) { if (own(s, k)) moved[k.page] = 1; });
+      if (s.submission && !s.hidden) kids(s).forEach(function (k) { moved[k.page] = 1; });
     });
     return { kids: kids, moved: moved };
   }
@@ -260,7 +261,6 @@ li.kid{margin-left:22px;padding-left:8px;border-left:1px solid var(--line)}
       li.className = 'kid';
       var br = (sub.basis_rounds || {})[r.theme], rn = br && /-(r\d+)/.exec(br);
       if (br && br !== r.round) a.appendChild(el('span', 'note', M.based.replace('%s', rn ? rn[1] : br)));
-      if (!own(sub, r)) a.appendChild(el('span', 'ref', r.owner !== sub.owner ? r.owner || M.no_owner : r.group));
     }
     if (r.submission && r.basis_missing.length) {
       a.appendChild(el('span', 'note', M.missing.replace('%s', r.basis_missing.join(', '))));

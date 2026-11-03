@@ -94,6 +94,7 @@
       'sb.basis': 'Show or hide the work reports it is based on',
       'sb.based': 'submitted with {r}',
       'sb.nobasis': 'No report of its basis is found',
+      'sb.otherbasis': 'Based on other owners' reports only (they are in their own groups)',
       'sb.missing': 'Not found: {x}',
       'read.title': 'Did you read this report',
       'read.note': 'Press Read when you are done. Select text in the report to comment on it.',
@@ -177,6 +178,7 @@
       'sb.basis': '根拠にした作業用のレポートの表示の切り替え',
       'sb.based': '提出は {r}',
       'sb.nobasis': '根拠のレポートが見つからない',
+      'sb.otherbasis': '根拠はほかの担当のレポートだけ（それぞれの担当の欄にある）',
       'sb.missing': '見つからない根拠: {x}',
       'read.title': 'このレポートを読んだか',
       'read.note': '読み終えたら『読んだ』。本文の文字を選ぶとコメントできます。',
@@ -1740,8 +1742,8 @@
   // only when they do not fit (the whole title in the tooltip). A title that ends with its round and time ("… r3 10-29
   // 15:50") is shown without them, as they follow anyway
   var WHEN_RE = /\s+r\d+\s+\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2}$/;
-  // sub: the submission whose folder the row is in, ref: the name of the group the row stays in as well (another owner's)
-  function reportRow(r, sub, ref) {
+  // sub: the submission whose folder the row is in
+  function reportRow(r, sub) {
     var a = el('a', 'talk-sb-row'), txt = el('span', 'talk-sb-text'), title = r.title || r.theme || r.page;
     var rn = /-(r\d+)/.exec(r.round || '');
     a.href = '/' + r.page.split('/').map(encodeURIComponent).join('/');
@@ -1756,14 +1758,14 @@
     if (br && br !== r.round) {                             // a newer round since the submission was based on it
       txt.appendChild(el('span', 'talk-sb-note', tr('sb.based', { r: brn ? brn[1] : br })));
     }
-    if (ref) txt.appendChild(el('span', 'talk-sb-note talk-sb-other', ref));
     a.appendChild(txt);
     return a;
   }
 
   // a submission (a page with <meta name="report-basis">): a folder like a release, the page's own row with a mark and
-  // a button that shows the work reports it is based on (closed at first, unless this page is one of them)
-  function subFolder(s, kids, own, ref) {
+  // a button that shows the work reports of its own owner it is based on (closed at first, unless this page is one of
+  // them); others: how many of its basis are other owners' reports, which stay in their own groups alone
+  function subFolder(s, kids, others) {
     var box = el('div', 'talk-sb-sub'), head = el('div', 'talk-sb-subhead'), body = el('div', 'talk-sb-subbody');
     var open = button('talk-sb-open', '');
     open.title = tr('sb.basis');
@@ -1774,8 +1776,8 @@
     var n = kids.filter(isUnread).length;
     if (n) head.appendChild(el('span', 'talk-sb-gunread', tr('sb.unread', { n: n })));
     if (s.page === page) head.classList.add('talk-here');
-    kids.forEach(function (k) { body.appendChild(reportRow(k, s, own(k) ? '' : ref(k))); });
-    if (!kids.length) body.appendChild(el('p', 'talk-sb-empty', tr('sb.nobasis')));
+    kids.forEach(function (k) { body.appendChild(reportRow(k, s)); });
+    if (!kids.length) body.appendChild(el('p', 'talk-sb-empty', tr(others ? 'sb.otherbasis' : 'sb.nobasis')));
     if ((s.basis_missing || []).length) {
       body.appendChild(el('p', 'talk-sb-empty', tr('sb.missing', { x: s.basis_missing.join(', ') })));
     }
@@ -1791,8 +1793,8 @@
 
   // the reports by place (a server of several folders) or by owner; unread ones bold, ones added since this page opened
   // marked new, this page marked; the ones hidden in the list left out (but this page). A submission comes first in
-  // its group as a folder: the reports it is based on of the same owner (and group) move into it, another owner's stay
-  // in their own group and appear in the folder too, with that owner's name
+  // its group as a folder: the reports it is based on of the same owner (and group) move into it; another owner's stay
+  // in their own group alone (a report is listed under the one who wrote it)
   function renderReports(rows) {
     rows = rows.filter(function (r) { return !r.hidden || r.page === page; });
     if (!reportsFirst) {
@@ -1841,8 +1843,8 @@
       rs.filter(function (r) { return r.submission; }).concat(rs.filter(function (r) { return !r.submission; }))
         .forEach(function (r) {
           if (!r.submission) { list.appendChild(reportRow(r)); return; }
-          list.appendChild(subFolder(r, kidsOf(r), function (k) { return k.owner === r.owner && gkey(k) === gkey(r); },
-                                     function (k) { return k.owner !== r.owner ? k.owner || tr('sb.noowner') : gkey(k); }));
+          var kids = kidsOf(r), own = kids.filter(function (k) { return k.owner === r.owner && gkey(k) === gkey(r); });
+          list.appendChild(subFolder(r, own, kids.length - own.length));
         });
       g.appendChild(head);
       g.appendChild(list);

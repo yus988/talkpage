@@ -229,8 +229,8 @@ work reports it is based on: `<meta name="report-basis" content="<theme>/<round>
 theme without a round means its newest round; under `--place` a theme of the same folder is looked for first, another
 folder's is `<id>/<theme>`). In the list and the sidebar a submission is a folder marked "Submission" with its basis
 reports inside, like a release that gathers the work leading to it. Basis reports of the same owner (and, under
-`--place`, the same heading) move into the folder; another owner's stay in their own group and appear in the folder
-too, with that owner's name. A newer round than the one named shows as "submitted with r2". Words that name no theme
+`--place`, the same heading) move into the folder; another owner's stay in their own group alone (a report is listed
+under the one who wrote it; a folder based on other owners' reports alone says so). A newer round than the one named shows as "submitted with r2". Words that name no theme
 are shown in the list and by `reports list`. A changed meta shows the next time the list is read.
 
 **Serving**: an HTML page under the root gets `talkpage.css` and `talkpage.js` (with `data-talk-report`) before

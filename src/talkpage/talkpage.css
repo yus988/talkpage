@@ -263,7 +263,6 @@ body { padding-bottom: 64px; }
 .talk-sb-subbody { margin-left: 11px; padding-left: 2px; border-left: 1px solid var(--talk-line); }
 .talk-sb-subbody[hidden] { display: none; }
 .talk-sb-note { flex: none; font-size: 13px; color: var(--talk-muted); white-space: nowrap; }
-.talk-sb-other { padding: 0 4px; border: 1px solid var(--talk-line); border-radius: 3px; }   /* another owner's report */
 .talk-toc { padding-left: 8px; }
 .talk-toc-h2 { padding-left: 20px; }
 .talk-toc-h3 { padding-left: 32px; font-size: 14px; }
