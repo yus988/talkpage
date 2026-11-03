@@ -1511,14 +1511,15 @@
       visualViewport.addEventListener('resize', placeUnzoom);
       visualViewport.addEventListener('scroll', placeUnzoom);
     }
-    minus.addEventListener('click', function () { zoomBy(-0.1); });
-    plus.addEventListener('click', function () { zoomBy(0.1); });
-    zoomLabel.addEventListener('click', function () { applyZoom(1); savePrefs(); });
-    fit.addEventListener('click', fitZoom);
+    // the buttons keep what is in the middle of the window where it is; Ctrl + wheel keeps what is under the pointer
+    minus.addEventListener('click', function () { zoomBy(-0.1, window.innerHeight / 2); });
+    plus.addEventListener('click', function () { zoomBy(0.1, window.innerHeight / 2); });
+    zoomLabel.addEventListener('click', function () { applyZoom(1, window.innerHeight / 2); savePrefs(); });
+    fit.addEventListener('click', function () { fitZoom(); });
     window.addEventListener('wheel', function (e) {          // Ctrl + wheel zooms the report, not the browser
       if (!e.ctrlKey) return;
       e.preventDefault();
-      zoomBy(e.deltaY < 0 ? 0.1 : -0.1);
+      zoomBy(e.deltaY < 0 ? 0.1 : -0.1, e.clientY);
     }, { passive: false });
     grip.addEventListener('pointerdown', function (e) {
       e.preventDefault();
@@ -1598,15 +1599,66 @@
     relayout();
   }
 
-  function applyZoom(z) {
+  // what is at the window's height y in the report: a line of text there (tried across the report), else the smallest
+  // block around y, else the nearest block. Not a large box: the report's lines wrap anew at another zoom, so only a
+  // line or a small block keeps its place
+  var HOLD_BLOCKS = 'p, li, h1, h2, h3, h4, h5, h6, td, th, dt, dd, figcaption, caption, blockquote, pre, img, svg, canvas, video';
+  function caretRange(x, y) {
+    try {
+      if (document.caretPositionFromPoint) {
+        var p = document.caretPositionFromPoint(x, y);
+        if (!p || !p.offsetNode) return null;
+        var r = document.createRange();
+        r.setStart(p.offsetNode, p.offset);
+        return r;
+      }
+      return document.caretRangeFromPoint ? document.caretRangeFromPoint(x, y) : null;
+    } catch (e) { return null; }
+  }
+  function spotAt(y) {
+    var c = content.getBoundingClientRect();
+    for (var i = 1; i <= 5; i++) {
+      var x = Math.min(Math.max(c.left + c.width * i / 6, 1), window.innerWidth - 2), r = caretRange(x, y);
+      var b = r && r.startContainer.nodeType === 3 && content.contains(r.startContainer) && !ours(r.startContainer) &&
+              r.getBoundingClientRect();
+      if (b && b.height && b.top <= y + 2 && b.bottom >= y - 2) return r;
+    }
+    var best = null, bh = Infinity, near = null, nd = Infinity;
+    content.querySelectorAll(HOLD_BLOCKS).forEach(function (e) {
+      if (ours(e) || e.parentElement && e.parentElement.closest('svg')) return;
+      var b = e.getBoundingClientRect();
+      if (!b.height) return;
+      if (b.top <= y && b.bottom >= y) { if (b.height < bh) { bh = b.height; best = e; } }
+      else { var d = Math.min(Math.abs(b.top - y), Math.abs(b.bottom - y)); if (d < nd) { nd = d; near = e; } }
+    });
+    return best || near || content;
+  }
+  // keeps what is at the window's height y there across a change of the zoom: returns what puts it back. Below a line
+  // of text by a distance that grows with the zoom; in a block by the share of its height (a picture need not grow with
+  // the zoom, a grid may put it elsewhere)
+  function holdAt(y) {
+    y = Math.min(Math.max(y, 1), window.innerHeight - 2);
+    var s = spotAt(y), z0 = sb.zoom, b = s.getBoundingClientRect(), off = y - b.top, f = b.height ? off / b.height : 0;
+    return function () {
+      var line = !s.nodeType, n = (line ? s.startContainer.isConnected : s.isConnected) ? s.getBoundingClientRect()
+                                                                                          : content.getBoundingClientRect();
+      var d = n.top + (line ? off * sb.zoom / z0 : f * n.height) - y;
+      if (Math.abs(d) >= 1) window.scrollBy({ top: d, behavior: 'instant' });
+    };
+  }
+
+  // at: a height in the window whose text stays there (none on load)
+  function applyZoom(z, at) {
+    var keep = at == null ? null : holdAt(at);
     z = Math.max(0.5, Math.min(3, Math.round(z * 100) / 100));
     sb.zoom = z;
     content.style.zoom = z === 1 ? '' : String(z);
     zoomLabel.textContent = Math.round(z * 100) + '%';
     placeContent();
     dirtyAll();
+    if (keep) keep();
   }
-  function zoomBy(d) { applyZoom(Math.round((sb.zoom + d) * 10) / 10); savePrefs(); }
+  function zoomBy(d, at) { applyZoom(Math.round((sb.zoom + d) * 10) / 10, at); savePrefs(); }
 
   // after a pinch zoom: "100%" at the top right of what is on screen, its size kept (a fixed element sits on the layout
   // viewport, which the visual viewport moves over and magnifies)
@@ -1633,7 +1685,7 @@
     var r = content.getBoundingClientRect(), cards = scopes.length ? CARD_MAX : 0;
     var left = sb.open && layoutWidth() >= 900 ? sbEl.getBoundingClientRect().right + 12 : 12;
     var avail = document.documentElement.clientWidth - left - (cards ? 24 : 12);
-    if (r.width > 0 && avail > 0) applyZoom(avail / (r.width / sb.zoom + cards));
+    if (r.width > 0 && avail > 0) applyZoom(avail / (r.width / sb.zoom + cards), window.innerHeight / 2);
     savePrefs();
   }
 
