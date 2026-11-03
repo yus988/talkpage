@@ -194,9 +194,10 @@ body { padding-bottom: 64px; }
 .talk-readbox-title { font-weight: 600; }
 .talk-readbox-note { margin: 2px 0 0; font-size: 13px; color: var(--talk-muted); }
 
-/* the sidebar: reports and headings */
+/* the sidebar: reports and headings. It sits low (z-index 7-9) so that what the page puts over the window (a picture
+   shown large, a dialog) covers it */
 .talk-sbbar {
-  position: fixed; left: 8px; top: 8px; z-index: 1001; display: flex; align-items: center; gap: 4px; padding: 3px 6px;
+  position: fixed; left: 8px; top: 8px; z-index: 9; display: flex; align-items: center; gap: 4px; padding: 3px 6px;
   font: 12px/1.5 system-ui, sans-serif; background: var(--talk-bg); border: 1px solid var(--talk-line); border-radius: 16px; box-shadow: 0 1px 6px rgba(0, 0, 0, .12);
 }
 .talk-sbbar button {
@@ -209,7 +210,7 @@ body { padding-bottom: 64px; }
 .talk-sb-home[hidden] { display: none; }
 .talk-sb-zoom { min-width: 3.6em; }
 .talk-sb {
-  position: fixed; left: 0; top: 0; bottom: 0; z-index: 990; box-sizing: border-box; display: flex; flex-direction: column;
+  position: fixed; left: 0; top: 0; bottom: 0; z-index: 8; box-sizing: border-box; display: flex; flex-direction: column;
   padding: 44px 0 8px; font: 13px/1.5 system-ui, sans-serif; color: var(--talk-fg); background: var(--talk-bg); border-right: 1px solid var(--talk-line);
 }
 @media (max-width: 899px) { .talk-sb { box-shadow: 4px 0 18px rgba(0, 0, 0, .2); } }
@@ -267,8 +268,12 @@ body { padding-bottom: 64px; }
 .talk-sb-empty { margin: 4px 8px; color: var(--talk-muted); }
 .talk-sb-grip { position: absolute; top: 0; right: -3px; bottom: 0; width: 6px; cursor: col-resize; }
 .talk-sb-grip:hover { background: var(--talk-line); }
-.talk-sb-back { position: fixed; inset: 0; z-index: 989; background: rgba(0, 0, 0, .35); }
+.talk-sb-back { position: fixed; inset: 0; z-index: 7; background: rgba(0, 0, 0, .35); }
 .talk-sb-back[hidden], .talk-unzoom[hidden] { display: none; }
+
+/* a layer of the page over the whole window is open (talkpage.js watchCover): it stays on top of our parts */
+.talk-covered .talk-layer, .talk-covered .talk-dock, .talk-covered .talk-sb, .talk-covered .talk-sbbar,
+.talk-covered .talk-sb-back, .talk-covered .talk-unzoom { visibility: hidden; }
 
 /* after a pinch zoom (placed by talkpage.js on what is on screen) */
 .talk-unzoom {

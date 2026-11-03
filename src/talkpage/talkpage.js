@@ -1906,6 +1906,33 @@
     seen: function (id) { return post('seen', { page: page, id: id }).then(function (d) { take(d); return d; }); }
   };
 
+  // ---------------------------------------------------------------- the page's own layers over the whole window
+  // the cards, the dock and the sidebar sit above the report; a layer of the page that covers the window (a picture
+  // shown large, a dialog) stays on top of them: they hide while it is open (html.talk-covered)
+  var cover = null;
+  function covers(e) {
+    if (!(e instanceof Element) || ours(e)) return false;
+    var s = getComputedStyle(e);
+    if (s.position !== 'fixed' || s.display === 'none' || s.visibility === 'hidden' || +s.opacity === 0) return false;
+    var r = e.getBoundingClientRect();
+    return r.width >= window.innerWidth * 0.8 && r.height >= window.innerHeight * 0.8;
+  }
+  function watchCover() {
+    if (!('MutationObserver' in window)) return;
+    new MutationObserver(function (ms) {
+      var found = cover && cover.isConnected && covers(cover) ? cover : null;
+      ms.forEach(function (m) {
+        if (found) return;
+        var list = m.type === 'attributes' ? [m.target] : [].slice.call(m.addedNodes);
+        list.some(function (e) { return covers(e) && (found = e); });
+      });
+      if (found === cover) return;
+      cover = found;
+      html.classList.toggle('talk-covered', !!cover);
+    }).observe(document.body, { subtree: true, childList: true, attributes: true,
+                                attributeFilter: ['class', 'style', 'hidden', 'open'] });
+  }
+
   // <body data-talk-listing>: the server's list of reports (no page file, so no state): the sidebar and zoom only
   var LISTING = false;
   function start() {
@@ -1913,6 +1940,7 @@
     LISTING = body.hasAttribute('data-talk-listing');
     REPORT = !LISTING && (REPORT || body.hasAttribute('data-talk-report'));
     SIDEBAR = LISTING || REPORT || body.hasAttribute('data-talk-sidebar');
+    watchCover();
     if (LISTING) {
       content = findContent();
       buildSidebar();
