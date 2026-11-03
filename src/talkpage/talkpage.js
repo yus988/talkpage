@@ -193,6 +193,7 @@
   var MARKS = {}, SHORT_MARKS = {};       // SHORT_MARKS: in a comment card's one-row head
   ['new', 'wait', 'read', 'err'].forEach(function (m) { MARKS[m] = tr('mark.' + m); SHORT_MARKS[m] = tr('mark.short.' + m); });
   var items = {};          // id -> item as the server keeps it
+  var taken = [];          // ids of the comments of the theme's other rounds (a new comment takes another number)
   var ui = {};             // id -> the item's elements and settings
   var order = [];          // declared ids in document order
   var rev = -1, presence = 'down', downWhy = '', jumpAt = -1, listeners = [], dock = {};
@@ -468,6 +469,7 @@
   function apply(d) {
     rev = d.rev;
     presence = d.presence || 'absent';
+    taken = d.taken || [];
     Object.keys(d.items || {}).forEach(function (k) { items[k] = d.items[k]; });
     order.forEach(render);
     syncCards();
@@ -793,7 +795,7 @@
 
   function nextId(prefix) {
     var re = new RegExp('^' + prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(\\d+)$'), max = 0;
-    Object.keys(items).concat(order, Object.keys(cards)).forEach(function (id) {
+    Object.keys(items).concat(order, Object.keys(cards), taken).forEach(function (id) {
       var m = re.exec(id);
       if (m) max = Math.max(max, +m[1]);
     });

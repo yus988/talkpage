@@ -235,9 +235,22 @@ talkpage serve --reports --place "sdk-workspace:notes=C:/ws-a/dev-notes" --place
 - `thread`: 状態の変更（`status`。`""` は解除）とコメント（`text`）を、ユーザー（`user`）とエージェント（`agent`）の両方について時刻順に残す
 - `user_rev`: エージェントに知らせるユーザーの最後の操作の版、`agent_rev`: エージェントの最後の返信・ack の版。`user_rev > agent_rev` の間、その項目は「エージェント未読」
 - `seen_rev`: ユーザーが読んだエージェントの最後のメッセージの版
+- `carried_from`・`carried_id`（別の回から写した項目）: 最初に書いた回のページと、そこでの番号（番号が同じなら `carried_id` は無い）。「回をまたぐコメント」
 - `anchor`（文字を選んで付けたコメント）: `{"heads": [その文字の上の見出し（外側から）], "id": 一番近い id の付いた要素, "pos": 本文の上からの割合 0〜1}`。本文が変わったとき、カードを元の場所の近くに出す手がかり。新しい回へコメントを引き継ぐツールも同じ形で書ける
 - `edits`（ファイルの最上位）: ユーザーが「編集」で直した本文 `[{"time", "tag", "before", "after"}]`（文字は空白をまとめて 300 字まで。新しい 200 件）
 - ほかのキー（項目の `fields`、ファイルの最上位の独自のキー）はそのまま残す
+
+## 回をまたぐコメント
+
+テーマの回（`<テーマ>/<YYYYMMDD-HHMM-rN>/index.html`。新しい回は前の回を写して作る）は、選んだ文字へのコメント（`C1`・`C2`…）を共有する。`--reports` が無くても、回の形のフォルダなら同じように働く。
+
+1. 書いた回より後の回に、そのコメントを写す。後から古い回に書いたコメントも、新しい回に届く
+2. どの回で付けた返信・コメント・状態（`status`）も、ほかの回の同じコメントに届く。状態は、いちばん新しい状態の変更に合わせる。r4 で「解決」にしたコメントは、r5・r6 でも解決になる
+3. 写した項目は `carried_from`（最初に書いた回のページ）と、番号が違うときは `carried_id`（そこでの番号）を持つ。番号が後の回の別のコメントと重なるときは、テーマで使っていない次の番号にする。新しいコメントの番号も、テーマのほかの回で使っていない番号にする（`state` の `taken`）
+4. サーバーは、起動したときと、新しい回のページを初めて聞かれたときに、テーマの回をつなぐ。`talkpage link --page <新しい回のページ>` で、その場でつなぐ（写した・そろえたページと番号を出す）
+5. 写した項目はエージェントを待たない（未読はユーザーが書いた回にだけ付く）。返信を読んだことは、ほかの回にも届く
+6. 対象は、場所の手がかり（`anchor`）を持つか、別の回から写した、選んだ文字へのコメント。固定の要素の項目と「読んだ」（`read`）は回ごと
+7. `--place` では、フォルダの直下の回も 1 つのテーマ（フォルダ自体がテーマ）
 
 ## HTTP API
 
@@ -246,7 +259,7 @@ talkpage serve --reports --place "sdk-workspace:notes=C:/ws-a/dev-notes" --place
 | | |
 |---|---|
 | `GET /_talk/api/info` | root（`--place` なら `places: [{id, group, root}]`）、ポート、エージェントの状態（`listening` / `working` / `absent`）、状態のあるページ、`name`・`url`（ユーザーが読むアドレス。`--tailscale` なら tailnet のアドレス）・`local_url`（この PC だけのアドレス）、`open`（90 秒以内に `state` を `open=1` 付きで聞いたページ = ブラウザのタブで開いているページ） |
-| `GET /_talk/api/state?page=P` | ページの全項目。`&rev=N&wait=25`（と `&presence=…`）を付けると、版（とエージェントの状態）が変わるまで最大その秒数待つ。`&open=1` でそのページを「開いている」とする |
+| `GET /_talk/api/state?page=P` | ページの全項目と、テーマのほかの回のコメントの番号（`taken`）。`&rev=N&wait=25`（と `&presence=…`）を付けると、版（とエージェントの状態）が変わるまで最大その秒数待つ。`&open=1` でそのページを「開いている」とする |
 | `GET /_talk/api/reports` | `--reports` のときだけ。レポートの一覧 `{root, url, places, rows: [{page, theme, round, title, owner, owner_id, tracked, status, read, comments, time, lang, place, group, star, tags, hidden, submission}]}`（新しい順）。提出の行には `basis`（根拠のテーマ）・`basis_rounds`（書かれた回 `{テーマ: 回}`）・`basis_missing`（見つからない語）、根拠にされたテーマの行には `in`（それを挙げた提出のテーマ） |
 | `POST /_talk/api/mark` `{page, star?, tags?, hidden?}` | `--reports` のときだけ。一覧のスター（`true` / `false`）、タグ（文字列の配列。`[]` で外す）、非表示（`true` / `false`）。省いたものはそのまま |
 | `GET /_talk/api/pending[?page=P]` | エージェント未読の項目と、各項目の新しいユーザーの操作（`new`）。`wait` の内部で `&wait=50&listen=1`（待っている間は「受付中」、出したものは再び出さない）と `&take=1` を使う |
@@ -255,6 +268,7 @@ talkpage serve --reports --place "sdk-workspace:notes=C:/ws-a/dev-notes" --place
 | `POST /_talk/api/agent` `{page, id, reply?, status?, fields?}` | エージェントの返信（項目が無ければ作る）。未読を消す |
 | `POST /_talk/api/ack` `{page?, ids?}` | 未読を返信なしで消す（`ids` を省くとそのページの全部、`page` も省くと全ページ） |
 | `POST /_talk/api/edit` `{page, tag, text, nth, count?, html, after?}` | ユーザーの本文の直し（ページの「編集」が送る）。`tag`（`p`・`li`・`h1`〜`h6`・`td`・`th`・`dt`・`dd`・`figcaption`・`caption`・`blockquote`）の要素のうち、文字（空白をまとめたもの）が `text` の `nth` 番目（0 から。`data-talk`・`template`・`noscript` の中は数えない）の中身を `html` にしてファイルに書き、状態の `edits` に残す。`count`（ページで数えた同じものの数）がファイルと違うとき、そのタグに終わりのタグの無い要素があるとき、`html` にスクリプト・埋め込み・`on…=`・`javascript:` があるときは書かない（400）。エージェントは起こさない |
+| `POST /_talk/api/link` `{page}` | そのページのテーマの回をつなぐ（「回をまたぐコメント」）。`changed` に、写した・そろえたページと番号 |
 | `GET /_talk/talkpage.js` `/_talk/talkpage.css` | ページ側 |
 
 agent・ack・state・pending の `page` は、パスの一部（状態のあるページ、無ければ root の下の全ページの中で 1 つに決まる文字列）でもよい。エージェントはユーザーより先に書ける（結果の記入など）。user・seen・edit は正確なパスだけ。
