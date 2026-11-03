@@ -137,6 +137,8 @@ the page's CSS can change it).
   Japanese input only confirms). The result ("Saved", or why not) shows above the block's right end; a block that
   could not be saved keeps a red outline. While editing, selecting text shows no "Comment" and a click on a highlight
   opens no card
+- Selecting text also shows "Edit" beside "Comment" when the selection is inside one block: that block alone takes
+  text, with the selection kept (typing replaces it); leaving it saves it
 - To save, the server finds the block in the page's file by its tag, its text (white space squashed), which one of
   the same it is and how many of them there are, writes its new content and keeps the fix in the state's `edits`
   (`show` prints `~ edit` lines); an agent that builds the page again reads them first and takes them into its source.

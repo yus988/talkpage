@@ -42,6 +42,7 @@
       'shrink': 'Back to the card',
       'edit': 'Edit',
       'edit.title': 'Fix the text in place: each block is saved when you leave it or press Enter; Esc puts it back',
+      'edit.one.title': 'Fix this block in place (Enter or a click elsewhere saves, Esc puts it back)',
       'edit.saving': 'Saving…',
       'edit.saved': 'Saved',
       'edit.failed': 'Not saved: {msg}',
@@ -114,6 +115,7 @@
       'shrink': 'カードに戻す',
       'edit': '編集',
       'edit.title': '本文をその場で書き換える（塊ごとに保存。Enter か、ほかの所を押すと保存、Esc で取り消し）',
+      'edit.one.title': 'この塊をその場で書き換える（Enter か、ほかの所を押すと保存、Esc で取り消し）',
       'edit.saving': '保存中…',
       'edit.saved': '保存しました',
       'edit.failed': '保存できませんでした：{msg}',
@@ -574,7 +576,7 @@
   var cards = {};           // id -> comment card of an item <prefix><number> the server keeps
   var draft = null;         // the card of a comment not sent yet (not on the server)
   var openNow = null, big = null, showResolved = false;
-  var layer = null, selBtn = null, content = null, layoutQueued = false;
+  var layer = null, selBtn = null, selEdit = null, content = null, layoutQueued = false;
   var touched = false, selTimer = 0;            // the last pointer was a finger; the wait for a touch selection
   var marks = !!(window.CSS && CSS.highlights && typeof Highlight === 'function');
 
@@ -1182,7 +1184,8 @@
     relayout();
   }
 
-  // the "comment" button by a selection of the report's text (while text is being written in, selecting is for writing)
+  // the "comment" button by a selection of the report's text, and "edit" beside it when the selection is in one block
+  // of text (while text is being written in, selecting is for writing: neither)
   function onSelect() {
     var sel = getSelection(), s = null, r = null;
     if (sel && sel.rangeCount && !sel.isCollapsed && !editing && !editBlock(document.activeElement)) {
@@ -1191,13 +1194,21 @@
       if (s && (ours(r.commonAncestorContainer) || ours(r.startContainer) || ours(r.endContainer) ||
                 !squash(sel.toString()))) s = null;
     }
-    if (!s) { selBtn.hidden = true; selBtn.sel = null; return; }
+    if (!s) { selBtn.hidden = selEdit.hidden = true; selBtn.sel = selEdit.block = null; return; }
+    var b = FILE_PAGE ? blockOf(r.startContainer) : null;
+    selEdit.block = b && b === blockOf(r.endContainer) ? b : null;
+    selBtn.hidden = false;
+    selEdit.hidden = !selEdit.block;
     var rects = r.getClientRects(), last = rects[rects.length - 1] || r.getBoundingClientRect();
     var base = layer.getBoundingClientRect(), vw = document.documentElement.clientWidth;
-    selBtn.hidden = false;
-    selBtn.style.left = Math.max(4, Math.min(last.right + 4, vw - selBtn.offsetWidth - 8)) - base.left + 'px';
-    selBtn.style.top = last.bottom + (touched ? 28 : 4) - base.top + 'px';     // below a phone's selection handle
+    var w = selBtn.offsetWidth + (selEdit.block ? selEdit.offsetWidth + 4 : 0);
+    var left = Math.max(4, Math.min(last.right + 4, vw - w - 8)) - base.left;
+    var top = last.bottom + (touched ? 28 : 4) - base.top + 'px';           // below a phone's selection handle
+    selBtn.style.left = left + 'px';
+    selEdit.style.left = left + selBtn.offsetWidth + 4 + 'px';
+    selBtn.style.top = selEdit.style.top = top;
     selBtn.sel = { scope: s, range: r.cloneRange(), text: sel.toString() };
+    selEdit.range = selBtn.sel.range;
   }
 
   function caretAt(x, y) {
@@ -1259,23 +1270,29 @@
     layer = el('div', 'talk-ui talk-layer');
     document.body.appendChild(layer);
     selBtn = button('talk-ui talk-selbtn', tr('comment'));
-    selBtn.hidden = true;
-    layer.appendChild(selBtn);
-    selBtn.addEventListener('mousedown', function (e) { e.preventDefault(); });    // keeps the selection
-    selBtn.addEventListener('click', function () { if (selBtn.sel) newDraft(selBtn.sel); });
-    // a touch selection (long press, then the handles) sends no mouseup: follow selectionchange once it settles.
-    // A tap on the button would clear the selection before its click, so the touch itself opens the draft
-    selBtn.addEventListener('touchstart', function (e) { e.preventDefault(); }, { passive: false });
-    selBtn.addEventListener('touchend', function (e) {
-      e.preventDefault();
-      if (selBtn.sel) newDraft(selBtn.sel);
+    selEdit = button('talk-ui talk-selbtn talk-seledit', tr('edit'));
+    selEdit.title = tr('edit.one.title');
+    function onSelBtn(b) {
+      if (b === selBtn && selBtn.sel) newDraft(selBtn.sel);
+      if (b === selEdit && selEdit.block) editOne(selEdit.block, selEdit.range);
+      selBtn.hidden = selEdit.hidden = true;
+    }
+    [selBtn, selEdit].forEach(function (b) {
+      b.hidden = true;
+      layer.appendChild(b);
+      b.addEventListener('mousedown', function (e) { e.preventDefault(); });      // keeps the selection
+      b.addEventListener('click', function () { onSelBtn(b); });
+      // a touch selection (long press, then the handles) sends no mouseup: follow selectionchange once it settles.
+      // A tap on the button would clear the selection before its click, so the touch itself acts
+      b.addEventListener('touchstart', function (e) { e.preventDefault(); }, { passive: false });
+      b.addEventListener('touchend', function (e) { e.preventDefault(); onSelBtn(b); });
     });
     document.addEventListener('pointerdown', function (e) { touched = e.pointerType === 'touch'; }, true);
     document.addEventListener('mouseup', function () { if (!touched) setTimeout(onSelect, 0); });
     document.addEventListener('keyup', function (e) { if (!ours(e.target)) onSelect(); });
     document.addEventListener('selectionchange', function () {
       var sel = getSelection();
-      if (!sel || sel.isCollapsed) selBtn.hidden = true;
+      if (!sel || sel.isCollapsed) selBtn.hidden = selEdit.hidden = true;
       clearTimeout(selTimer);
       if (touched && sel && !sel.isCollapsed) selTimer = setTimeout(onSelect, 400);
     });
@@ -1649,8 +1666,8 @@
   }
 
   // ---------------------------------------------------------------- Edit: the user fixes the page's text in place
-  // Edit in the dock makes each block of text (a paragraph, a list item, a heading, a table cell …) take plain text.
-  // Leaving a block (or Enter) saves it:
+  // Edit in the dock makes each block of text (a paragraph, a list item, a heading, a table cell …) take plain text;
+  // Edit beside a selection does it for the block of the selected text alone. Leaving a block (or Enter) saves it:
   // /_talk/api/edit finds it in the page's file by its tag, its text and which one of the same it is, writes its new
   // content and keeps the fix for the agent (show). Esc puts it back. A block that holds other blocks stays as it is.
   var EDITABLE = 'p, li, h1, h2, h3, h4, h5, h6, td, th, dt, dd, figcaption, caption, blockquote';   // EDIT_TAGS of the server
@@ -1661,6 +1678,10 @@
     return !e.closest(OURS + ', [data-talk], [data-copy], svg') && !e.querySelector(EDITABLE) && !!squash(e.textContent);
   }
   function editables() { return [].filter.call(document.body.querySelectorAll(EDITABLE), canEdit); }
+  function blockOf(node) {                                  // the block of text a node is in, when it can be written in
+    var e = node && (node.nodeType === 1 ? node : node.parentElement), b = e && e.closest(EDITABLE);
+    return b && canEdit(b) ? b : null;
+  }
   function editBlock(t) { return t && t.closest ? t.closest('[data-talk-edit]') : null; }
   // which one of the blocks with its tag and its text it is, and how many there are, as the server counts them in the
   // file (talkpage's own parts and the items' threads are not in the file)
@@ -1696,12 +1717,20 @@
     editing = on;
     html.classList.toggle('talk-editing', on);
     dock.edit.setAttribute('aria-pressed', String(on));
-    if (selBtn) selBtn.hidden = true;
+    if (selBtn) selBtn.hidden = selEdit.hidden = true;
     editables().forEach(function (e) {
       if (on) { makeEditable(e); return; }
       if (e === document.activeElement) e.blur();          // saves it
       unmakeEditable(e);
     });
+  }
+  // Edit beside the selection: that one block, with the selected text still selected (typing replaces it)
+  function editOne(b, range) {
+    makeEditable(b);
+    b.focus({ preventScroll: true });
+    var s = getSelection();
+    s.removeAllRanges();
+    if (range) s.addRange(range);
   }
 
   // "saving", "saved" or why not, just above the block's right end
@@ -1744,6 +1773,7 @@
   }, true);
   document.addEventListener('focusout', function (e) {
     var b = editBlock(e.target), o = b && editOrig.get(b);
+    if (b && !editing) unmakeEditable(b);                   // the one block of Edit beside a selection
     if (!o) return;
     dirtyAll();                                             // its text nodes changed: the comments' places too
     if (b.innerHTML === o.html) {                           // nothing changed, or put back with Esc

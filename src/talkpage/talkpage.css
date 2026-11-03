@@ -175,12 +175,13 @@ body { padding-bottom: 64px; }
 .talk-modal-sum { margin: 6px 0; padding: 6px 10px; border: 1px dashed var(--talk-line); border-radius: 6px; white-space: pre-wrap; }
 
 /* Edit: the blocks that take text show a dashed outline on hover and a solid one while written in (outlines: nothing
-   moves); the note of saving above the block */
+   moves); "edit" beside the selection's "comment"; the note of saving above the block */
 [data-talk-edit] { outline: 1px dashed transparent; outline-offset: 2px; cursor: text; }
 .talk-editing [data-talk-edit]:not(:focus):hover { outline-color: var(--talk-muted); }
 [data-talk-edit]:focus { outline: 2px solid var(--talk-accent); }
 .talk-edit-ng:not(:focus), .talk-editing .talk-edit-ng:not(:focus):hover { outline: 2px solid var(--talk-ng); outline-offset: 2px; }
 .talk-dock .talk-edit-btn[aria-pressed="true"] { color: #fff; background: var(--talk-accent); border-color: var(--talk-accent); }
+.talk-seledit { color: var(--talk-accent); background: var(--talk-bg); box-shadow: 0 0 0 1px var(--talk-accent), 0 2px 8px rgba(0, 0, 0, .2); }
 .talk-edit-note {
   position: absolute; padding: 1px 8px; font: 12px/1.6 system-ui, sans-serif; white-space: nowrap; color: #fff;
   background: var(--talk-accent); border-radius: 4px; pointer-events: none;
