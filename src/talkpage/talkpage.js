@@ -1591,6 +1591,25 @@
 
   function isUnread(r) { return r.tracked && !r.read; }
 
+  // a report in the sidebar: one line, the name cut with … and its round and time after it, which go to a second line
+  // only when they do not fit (the whole title in the tooltip). A title that ends with its round and time ("… r3 10-29
+  // 15:50") is shown without them, as they follow anyway
+  var WHEN_RE = /\s+r\d+\s+\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2}$/;
+  function reportRow(r) {
+    var a = el('a', 'talk-sb-row'), txt = el('span', 'talk-sb-text'), title = r.title || r.theme || r.page;
+    var rn = /-(r\d+)/.exec(r.round || '');
+    a.href = '/' + r.page.split('/').map(encodeURIComponent).join('/');
+    a.title = title;
+    if (isUnread(r)) a.classList.add('talk-unread');
+    if (r.page === page) { a.classList.add('talk-here'); a.setAttribute('aria-current', 'page'); }
+    txt.appendChild(el('span', 'talk-sb-t', (r.star ? '★ ' : '') + (title.replace(WHEN_RE, '') || title)));
+    var when = [rn && rn[1], (r.time || '').slice(5)].filter(Boolean).join(' ');
+    if (when) txt.appendChild(el('span', 'talk-sb-meta', when));
+    if (!reportsFirst[r.page]) txt.appendChild(el('span', 'talk-sb-new', tr('sb.new')));
+    a.appendChild(txt);
+    return a;
+  }
+
   // the reports by place (a server of several folders) or by owner; unread ones bold, ones added since this page opened
   // marked new, this page marked; the ones hidden in the list left out (but this page)
   function renderReports(rows) {
@@ -1621,17 +1640,7 @@
       var list = el('div', 'talk-sb-rows');
       head.addEventListener('click', function () { toggleFold(key, head, list); });
       paintFold(key, head, list);
-      rs.forEach(function (r) {
-        var a = el('a', 'talk-sb-row');
-        a.href = '/' + r.page.split('/').map(encodeURIComponent).join('/');
-        if (isUnread(r)) a.classList.add('talk-unread');
-        if (r.page === page) { a.classList.add('talk-here'); a.setAttribute('aria-current', 'page'); }
-        a.appendChild(el('span', 'talk-sb-t', (r.star ? '★ ' : '') + (r.title || r.theme || r.page)));
-        var meta = el('span', 'talk-sb-meta', r.time || '');
-        if (!reportsFirst[r.page]) meta.appendChild(el('span', 'talk-sb-new', tr('sb.new')));
-        a.appendChild(meta);
-        list.appendChild(a);
-      });
+      rs.forEach(function (r) { list.appendChild(reportRow(r)); });
       g.appendChild(head);
       g.appendChild(list);
       rp.body.appendChild(g);

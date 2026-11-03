@@ -228,12 +228,14 @@ body { padding-bottom: 64px; }
 .talk-sb-row, .talk-toc { display: block; padding: 2px 6px 3px 16px; border-radius: 4px; color: var(--talk-fg); text-decoration: none; }
 .talk-sb-row:hover, .talk-toc:hover { background: var(--talk-user-bg); }
 .talk-sb-all { padding-left: 6px; margin-bottom: 4px; color: var(--talk-accent); }
-.talk-sb-t { display: block; overflow-wrap: anywhere; }
-.talk-sb-meta { display: block; font-size: 11px; color: var(--talk-muted); }
+/* a report: one line, the name cut with …; its round and time after it, on a second line only when they do not fit */
+.talk-sb-text { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; min-width: 0; }
+.talk-sb-t { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.talk-sb-meta { flex: none; font-size: 11px; color: var(--talk-muted); white-space: nowrap; }
 .talk-sb-row.talk-unread .talk-sb-t { font-weight: 700; }
 .talk-sb-row.talk-unread .talk-sb-t::before { content: "\25CF  "; color: var(--talk-accent); }
 .talk-sb-row.talk-here, .talk-toc.talk-here { background: var(--talk-agent-bg); color: var(--talk-accent); }
-.talk-sb-new { margin-left: 6px; padding: 0 5px; font-size: 10px; font-weight: 700; color: #fff; background: var(--talk-ng); border-radius: 8px; }
+.talk-sb-new { flex: none; padding: 0 5px; font-size: 10px; font-weight: 700; color: #fff; background: var(--talk-ng); border-radius: 8px; }
 .talk-toc { padding-left: 8px; }
 .talk-toc-h2 { padding-left: 20px; }
 .talk-toc-h3 { padding-left: 32px; font-size: 12px; }
