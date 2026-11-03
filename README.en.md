@@ -296,8 +296,10 @@ sidebar marks starred rows with ★; under `--place` it groups the reports by he
 - The sidebar (☰ at the top left): zoom of the report −, 100%, + (also Ctrl+wheel) and "Fit width". "Reports" lists
   the reports by owner, unread ones (the last round without "Read") in bold with ●, and "new" on rows that appeared
   after the page was opened, one line per report (a long title cut with …, its round and time after it, going to a
-  second line only when they do not fit; the whole title in the tooltip); "This page" lists the h1–h3 headings. Folds, width (200–520 px), open or closed and the
-  zoom stay in this browser. Under 900 px wide it opens over the report (a tap outside closes it) and starts closed
+  second line only when they do not fit; the whole title in the tooltip). Below it, this page's h1–h3 headings, always
+  open (no heading of their own); drag the bar between the two up or down for the height of the reports (a double
+  click puts them back to half and half). Folds, width (200–520 px), that height, open or closed and the zoom stay in
+  this browser. Under 900 px wide it opens over the report (a tap outside closes it) and starts closed
 - On a phone (under 700 px wide) the report keeps to the screen's width: grids made for a wide screen fall into one
   column, overflowing rows wrap, tables and code scroll inside their box. Zooming is the browser's pinch zoom; the
   report's zoom and "Fit width" are not shown, and after a pinch zoom a "100%" button at the top right brings the page

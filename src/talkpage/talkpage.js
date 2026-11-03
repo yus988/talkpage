@@ -80,7 +80,7 @@
       'sb.all': 'All reports (stars, tags)',
       'sb.home': '← List',
       'sb.home.title': 'The list of reports',
-      'sb.page': 'This page',
+      'sb.split': 'Drag for the height of the reports (double click: half and half)',
       'sb.noowner': 'No owner',
       'sb.unread': 'unread {n}',
       'sb.new': 'New',
@@ -158,7 +158,7 @@
       'sb.all': 'レポートの一覧（スター・タグ）',
       'sb.home': '← 一覧',
       'sb.home.title': 'レポートの一覧',
-      'sb.page': 'このページ',
+      'sb.split': 'ドラッグでレポートの欄の高さの変更（ダブルクリックで半分ずつに戻す）',
       'sb.noowner': '担当なし',
       'sb.unread': '未読 {n}',
       'sb.new': '新',
@@ -1339,7 +1339,7 @@
 
   // ---------------------------------------------------------------- reports: the sidebar
   var PREFS = 'talk-sidebar';
-  var sb = { open: true, width: 280, fold: {}, zoom: 1 };
+  var sb = { open: true, width: 280, fold: {}, zoom: 1, rh: 0 };      // rh: the reports' height, 0 for half
   var sbEl = null, sbTog = null, sbBack = null, zoomLabel = null, rp = null, tp = null, tocLinks = [], tocQueued = false;
   var unzoomBtn = null, homeLink = null;
 
@@ -1382,6 +1382,7 @@
         if (typeof v.width === 'number') sb.width = Math.max(200, Math.min(520, v.width));
         if (v.fold && typeof v.fold === 'object') sb.fold = v.fold;
         if (typeof v.zoom === 'number' && v.zoom > 0) sb.zoom = v.zoom;
+        if (typeof v.rh === 'number' && v.rh >= 0) sb.rh = v.rh;
       }
     } catch (e) {}
   }
@@ -1451,11 +1452,16 @@
     sbEl.style.width = sb.width + 'px';
     rp = pane('reports', tr('sb.reports'));
     rp.sec.hidden = true;                                  // until /_talk/api/reports answers
-    tp = pane('page', tr('sb.page'));
-    tp.sec.classList.add('talk-sb-toc');
+    rp.sec.classList.add('talk-sb-reps');
+    // this page's headings: always open, so no heading of their own; the bar above them sets the reports' height
+    tp = { sec: el('section', 'talk-sb-pane talk-sb-toc'), body: el('div', 'talk-sb-body') };
+    tp.sec.appendChild(tp.body);
+    var split = el('div', 'talk-sb-split');
+    split.title = tr('sb.split');
     var grip = el('div', 'talk-sb-grip');
     grip.title = tr('sb.grip');
-    [rp.sec, tp.sec, grip].forEach(function (x) { sbEl.appendChild(x); });
+    [rp.sec, split, tp.sec, grip].forEach(function (x) { sbEl.appendChild(x); });
+    splitter(split);
     sbBack = el('div', 'talk-ui talk-sb-back');            // a tap outside the sidebar lying over the report closes it
     sbBack.hidden = true;
     unzoomBtn = button('talk-ui talk-unzoom', '100%');
@@ -1506,6 +1512,32 @@
     applyZoom(sb.zoom);
     setOpen(sb.open, false);
     tocHere();
+  }
+
+  // the bar between the reports and this page's headings: dragged up and down, the reports' height (kept in this
+  // browser); a double click puts them back to half and half
+  function splitter(bar) {
+    function apply() {
+      if (sb.rh) sbEl.style.setProperty('--talk-sb-rflex', '0 1 ' + sb.rh + 'px');
+      else sbEl.style.removeProperty('--talk-sb-rflex');
+    }
+    bar.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      bar.setPointerCapture(e.pointerId);
+      var top = rp.sec.getBoundingClientRect().top, max = sbEl.getBoundingClientRect().bottom - top - 80;
+      function move(ev) { sb.rh = Math.round(Math.max(60, Math.min(max, ev.clientY - top))); apply(); }
+      function end() {
+        bar.removeEventListener('pointermove', move);
+        bar.removeEventListener('pointerup', end);
+        bar.removeEventListener('pointercancel', end);
+        savePrefs();
+      }
+      bar.addEventListener('pointermove', move);
+      bar.addEventListener('pointerup', end);
+      bar.addEventListener('pointercancel', end);
+    });
+    bar.addEventListener('dblclick', function () { sb.rh = 0; apply(); savePrefs(); });
+    apply();
   }
 
   function setOpen(on, save) {

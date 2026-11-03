@@ -214,7 +214,12 @@ body { padding-bottom: 64px; }
 }
 @media (max-width: 899px) { .talk-sb { box-shadow: 4px 0 18px rgba(0, 0, 0, .2); } }
 .talk-sb-pane { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; }
+.talk-sb-reps { flex: var(--talk-sb-rflex, 1 1 0); }      /* the reports: half, or the height the bar under them was dragged to */
 .talk-sb-pane.talk-folded { flex: none; }
+.talk-sb-split { flex: none; position: relative; z-index: 1; height: 8px; margin: -4px 0; cursor: row-resize; touch-action: none; }
+.talk-sb-split:hover { background: var(--talk-line); }
+.talk-sb-pane[hidden] + .talk-sb-split, .talk-sb-pane.talk-folded + .talk-sb-split { display: none; }
+.talk-sb-toc > .talk-sb-body { padding-top: 4px; border-top: 1px solid var(--talk-line); }
 .talk-sb-head, .talk-sb-ghead {
   display: flex; align-items: baseline; gap: 8px; width: 100%; text-align: left; font: inherit; color: var(--talk-fg);
   background: none; border: 0; cursor: pointer;
