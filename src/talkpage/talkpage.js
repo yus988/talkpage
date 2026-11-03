@@ -83,6 +83,9 @@
       'sb.split': 'Drag for the height of the reports (double click: half and half)',
       'sb.noowner': 'No owner',
       'sb.unread': 'unread {n}',
+      'sb.total': 'Unread {n}',
+      'sb.totalnew': ' (new {n})',
+      'sb.total.title': 'Reports not marked Read (new: since this page was opened)',
       'sb.new': 'New',
       'sb.notoc': 'No headings',
       'sb.submission': 'Submission',
@@ -161,6 +164,9 @@
       'sb.split': 'ドラッグでレポートの欄の高さの変更（ダブルクリックで半分ずつに戻す）',
       'sb.noowner': '担当なし',
       'sb.unread': '未読 {n}',
+      'sb.total': '未読 {n}',
+      'sb.totalnew': '（新 {n}）',
+      'sb.total.title': '「読んだ」を押していないレポートの数（新: このページを開いた後に増えたもの）',
       'sb.new': '新',
       'sb.notoc': '見出しなし',
       'sb.submission': '提出',
@@ -1477,6 +1483,9 @@
     rp = pane('reports', tr('sb.reports'));
     rp.sec.hidden = true;                                  // until /_talk/api/reports answers
     rp.sec.classList.add('talk-sb-reps');
+    rp.total = el('span', 'talk-sb-total');                 // all the unread reports, and how many came since
+    rp.total.title = tr('sb.total.title');
+    rp.head.appendChild(rp.total);
     // this page's headings: always open, so no heading of their own; the bar above them sets the reports' height
     tp = { sec: el('section', 'talk-sb-pane talk-sb-toc'), body: el('div', 'talk-sb-body') };
     tp.sec.appendChild(tp.body);
@@ -1722,6 +1731,10 @@
       reportsFirst = {};
       rows.forEach(function (r) { reportsFirst[r.page] = true; });
     }
+    var unread = rows.filter(isUnread), fresh = unread.filter(function (r) { return !reportsFirst[r.page]; });
+    rp.total.textContent = unread.length ? tr('sb.total', { n: unread.length }) +
+      (fresh.length ? tr('sb.totalnew', { n: fresh.length }) : '') : '';
+    rp.total.classList.toggle('talk-sb-fresh', !!fresh.length);
     var groups = [], by = {}, keep = rp.body.scrollTop, byTheme = {}, moved = {};
     var byPlace = rows.some(function (r) { return r.group; });
     function gkey(r) { return (byPlace ? r.group : r.owner) || ''; }

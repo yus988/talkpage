@@ -296,9 +296,10 @@ sidebar marks starred rows with ★; under `--place` it groups the reports by he
 - The sidebar (☰ at the top left): zoom of the report −, 100%, + (also Ctrl+wheel) and "Fit width"; the comment cards
   and the whole-thread view grow with the same zoom (Ctrl+wheel over the whole thread zooms the report too, and "Fit
   width" leaves room for the zoomed cards). "Reports" lists the reports by owner, unread ones (the last round without
-  "Read") in bold with ●, and "new" on rows that appeared after the page was opened, one line per report (a long title
-  cut with …, its round and time after it, going to a second line only when they do not fit; the whole title in the
-  tooltip). Below it, this page's h1–h3 headings, always open (no heading of their own); drag the bar between the two
+  "Read") in bold with ●, and "new" on rows that appeared after the page was opened; its heading shows "Unread n" for
+  all of them ("(new n)" added, in bold, when some came after the page was opened), each owner's heading its own. One
+  line per report (a long title cut with …, its round and time after it, going to a second line only when they do not
+  fit; the whole title in the tooltip). Below it, this page's h1–h3 headings, always open (no heading of their own); drag the bar between the two
   up or down for the height of the reports (a double click puts them back to half and half). 340 px wide at first.
   Folds, width (200–640 px), that height, open or closed and the zoom stay in this browser. Under 900 px wide it opens
   over the report (a tap outside closes it) and starts closed
