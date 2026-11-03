@@ -161,6 +161,33 @@ body { padding-bottom: 64px; }
 .talk-readbox-title { font-weight: 600; }
 .talk-readbox-note { margin: 2px 0 0; font-size: 13px; color: var(--talk-muted); }
 
+/* a figure of the report at full size, the page still seen behind it. Over what the report's CSS says about its images */
+.talk-zoom {
+  position: fixed; inset: 0; z-index: 3000; overflow: hidden; background: rgba(10, 12, 16, .7);
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+.talk-zoom[hidden] { display: none; }
+.talk-zoom-fig {
+  position: absolute !important; left: 0 !important; top: 0 !important; margin: 0 !important; padding: 0 !important;
+  max-width: none !important; max-height: none !important; min-width: 0 !important; min-height: 0 !important;
+  border: 0 !important; border-radius: 0 !important; box-shadow: 0 2px 18px rgba(0, 0, 0, .4) !important;
+  transition: none !important; touch-action: none; -webkit-user-drag: none;
+}
+.talk-zoom.talk-drag, .talk-zoom.talk-drag .talk-zoom-fig { cursor: grabbing !important; }
+.talk-zoom-bar {
+  position: absolute; right: 12px; top: 12px; transform-origin: 100% 0; display: flex; align-items: center; gap: 2px; padding: 3px;
+  background: var(--talk-bg); border-radius: 8px; box-shadow: 0 2px 10px rgba(0, 0, 0, .35);
+}
+.talk-zoom-bar button {
+  font: 20px/1 system-ui, sans-serif; color: var(--talk-fg); background: none; border: 0; border-radius: 6px;
+  min-width: 42px; height: 42px; padding: 0; cursor: pointer;
+}
+.talk-zoom-bar button:hover:not(:disabled) { background: var(--talk-user-bg); }
+.talk-zoom-bar button:disabled { opacity: .3; cursor: default; }
+.talk-zoom-bar .talk-zoom-pct { min-width: 68px; font-size: 16px; }
+/* iOS sends a click only from what looks clickable (no cursor shows on a touch screen) */
+@media (hover: none) { .talk-has-zoom img, .talk-has-zoom svg { cursor: pointer; } }
+
 /* the sidebar: reports and headings */
 .talk-sbbar {
   position: fixed; left: 8px; top: 8px; z-index: 1001; display: flex; align-items: center; gap: 4px; padding: 3px 6px;

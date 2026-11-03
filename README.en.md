@@ -108,7 +108,9 @@ A minimal page (see also [`sample/index.html`](sample/index.html); `talkpage ser
 | `data-talk-title="…"` | an item | The item name shown to the agent (default: the first 120 characters of the element's text) |
 | `data-copy` | a command box | Adds a "Copy" button. It copies the text of the `code` / `pre` inside (else of the box, or the value of `data-copy="…"`) and shows "Copied" right above the button |
 | `class="talk-offline"` | a note | Hidden when the page is opened from the server (for a note shown only when it is opened as a file) |
-| `data-talk-report` | the talkpage.js `<script>`, or `<body>` | The report features: comments on selected text anywhere in the page (items `C1`, `C2`, …), the sidebar, and the "read" item on the last round. A `--reports` server adds it when it serves a page |
+| `data-talk-report` | the talkpage.js `<script>`, or `<body>` | The report features: comments on selected text anywhere in the page (items `C1`, `C2`, …), the sidebar, figures at full size, and the "read" item on the last round. A `--reports` server adds it when it serves a page |
+| `data-full="<URL>"` | an `<img>` of a report | A larger file of the image for zooming. It is read only once the pixels run short, and takes over when it has loaded (the page stays light) |
+| `data-talk-nozoom` | a figure of a report, or an ancestor | A press does not open it (for a page where pressing an image does something else; on `<body>`, the whole page) |
 | `data-talk-select="<prefix>"` | an element | Comments on text selected inside that element only (items `<prefix><number>`) |
 | `data-talk-sidebar` | `<body>` | The sidebar alone (list of reports, headings, zoom) |
 | `data-talk-listing` | `<body>` | The server's list of reports: sidebar and zoom only, no state requests |
@@ -257,6 +259,15 @@ sidebar marks starred rows with ★; under `--place` it groups the reports by he
 - "Resolved" hides the card and its highlight without waking the agent; the dock's "Resolved n" shows them faded,
   each with "Reopen"
 - A reply never opens a closed card; it is marked "New reply" and counted as `(n)` at the start of the tab's name
+- A press on an image or a drawn figure (`<svg>`) of the report opens it over the page, as large as the window allows
+  (a small one is spread too; the page shows through behind it). Each press on it goes on to 2x, 4x and 8x; at 8x the
+  cursor turns to a minus and the next press goes back to the whole. The wheel (also with Ctrl) and two fingers zoom, a
+  drag or one finger moves it. −, %, + and × at the top right (keys `+`, `-`, `0` and the arrows). A press beside it,
+  Esc and × close. On a phone zoomed by pinch it lies over what is on screen. A comment being written stays open
+- What opens: any `<img>` of the page and any `<svg>` of 48 px or more on each side (a smaller one counts as an icon),
+  but none inside a link, a button, a label, a `summary`, or an element with `role="button"` or `onclick`. A view of its
+  own that a page has for its images (a `click` listener on them) stays shut, because the press is taken first (the file
+  stays as it is). Put `data-talk-nozoom` on an image that does something else when pressed
 - The sidebar (☰ at the top left): zoom of the report −, 100%, + (also Ctrl+wheel) and "Fit width". "Reports" lists
   the reports by owner, unread ones (the last round without "Read") in bold with ●, and "new" on rows that appeared
   after the page was opened; "This page" lists the h1–h3 headings. Folds, width (200–520 px), open or closed and the
@@ -372,6 +383,14 @@ python -m unittest discover tests
 
 They cover saving, the unread logic, reading old formats, the HTTP routes and refusals, and the round trip `wait` →
 comment → exit → `reply` → the reply reaching the page's long poll.
+
+The figures of a report at full size are checked in a browser (not part of the tests above; it needs
+[Playwright](https://playwright.dev/) with Chromium, `NODE_PATH` can point at its `node_modules`; the pages are made in
+a temporary folder):
+
+```
+node tests/zoom_browser.mjs
+```
 
 ## License
 

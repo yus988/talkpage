@@ -3,8 +3,9 @@
    data-copy get a copy button. Loaded from the server at /_talk/talkpage.js; see README.md. The text is English or
    Japanese by the page's <html lang> (else the browser's language).
    Reports (data-talk-report on this <script> or on <body>): the user selects text of the report to comment on it (a
-   card in the right margin), a sidebar lists the reports (/_talk/api/reports) and the headings of the page, and a
-   "read" item ends the report. data-talk-select="<prefix>" and <body data-talk-sidebar> give those parts alone. */
+   card in the right margin), a sidebar lists the reports (/_talk/api/reports) and the headings of the page, a press on
+   a figure opens it at full size, and a "read" item ends the report. data-talk-select="<prefix>" and
+   <body data-talk-sidebar> give the comments and the sidebar alone. */
 (function () {
   'use strict';
   var API = '/_talk/api/';
@@ -71,6 +72,10 @@
       'sb.unread': 'unread {n}',
       'sb.new': 'New',
       'sb.notoc': 'No headings',
+      'zoom.out': 'Smaller (−)',
+      'zoom.whole': 'Back to the whole figure (0)',
+      'zoom.in': 'Larger (+)',
+      'zoom.close': 'Close (Esc)',
       'read.title': 'Did you read this report',
       'read.note': 'Press Read when you are done. Select text in the report to comment on it.',
       'read.states': 'Read:ok,Again:ask'
@@ -130,6 +135,10 @@
       'sb.unread': '未読 {n}',
       'sb.new': '新',
       'sb.notoc': '見出しなし',
+      'zoom.out': '縮小（−）',
+      'zoom.whole': '全体に戻す（0）',
+      'zoom.in': '拡大（＋）',
+      'zoom.close': '閉じる（Esc）',
       'read.title': 'このレポートを読んだか',
       'read.note': '読み終えたら『読んだ』。本文の文字を選ぶとコメントできます。',
       'read.states': '読んだ:ok,もう一度:ask'
@@ -1020,24 +1029,30 @@
     return null;
   }
 
+  // the card of the marked text under a click, if any
+  function markAt(e) {
+    var sel = getSelection();
+    if (sel && !sel.isCollapsed) return null;
+    var p = caretAt(e.clientX, e.clientY);
+    if (!p) return null;
+    return cardList().filter(function (c) {
+      if (!c.range || c.resolved && !showResolved) return false;
+      try { return c.range.isPointInRange(p[0], p[1]); } catch (x) { return false; }
+    })[0] || null;
+  }
+
   // a click on marked text opens its card
   function onClick(e) {
     if (e.button !== 0 || ours(e.target)) return;
-    var sel = getSelection();
-    if (sel && !sel.isCollapsed) return;
-    var p = caretAt(e.clientX, e.clientY);
-    if (!p) return;
-    var hit = cardList().filter(function (c) {
-      if (!c.range || c.resolved && !showResolved) return false;
-      try { return c.range.isPointInRange(p[0], p[1]); } catch (x) { return false; }
-    })[0];
+    var hit = markAt(e);
     if (!hit) return;
     if (hit.scope.pins) openBig(hit); else openCard(hit);
   }
 
-  // elsewhere: the open card closes, a draft is dropped
+  // elsewhere: the open card closes, a draft is dropped. A look at a figure leaves them as they are
   function onDown(e) {
-    if (e.target.closest && e.target.closest('.talk-rcard, .talk-pin, .talk-modal, .talk-selbtn')) return;
+    if (e.target.closest && e.target.closest('.talk-rcard, .talk-pin, .talk-modal, .talk-selbtn, .talk-zoom')) return;
+    if (zoomFigure(e.target)) return;
     if (draft) dropDraft(); else if (openNow) closeCard(openNow);
   }
 
@@ -1454,6 +1469,262 @@
       });
   }
 
+  // ---------------------------------------------------------------- reports: a figure at full size
+  // A press on an image or a drawn figure (inline <svg>) opens it over the page, as large as the window allows. Each press
+  // on it goes on to 2x, 4x and 8x, and from 8x back to the whole; the wheel and two fingers zoom too, a drag moves it; a
+  // press beside it, Esc and × close. <img data-full="big.webp">: that file takes over once the pixels run short.
+  // The press is taken on its way down to the figure, so the smaller view an older report has of its own stays shut.
+  var ZOOM_OFF = 'a, button, label, summary, select, [role="button"], [onclick], [data-talk-nozoom], ' + OURS;
+  var ZOOM_STEPS = [1, 2, 4, 8], ZOOM_MAX = 8, ZOOM_ICON = 48;
+  var zoomOn = false;
+
+  // the figure a press on t opens: an image, or an <svg> larger than an icon; none in a link, in a control or in our parts
+  function zoomFigure(t) {
+    if (!zoomOn || !t.closest || t.closest(ZOOM_OFF)) return null;
+    var f = t.closest('img, svg');
+    while (f && f.ownerSVGElement) f = f.ownerSVGElement;
+    if (!f || f.tagName === 'IMG') return f;
+    var r = f.getBoundingClientRect();
+    return r.width >= ZOOM_ICON && r.height >= ZOOM_ICON ? f : null;
+  }
+
+  function setupZoom() {
+    var z = el('div', 'talk-ui talk-zoom'), bar = el('div', 'talk-zoom-bar'), vv = window.visualViewport;
+    var fig = null, ar = 1, pixels = 0, fit = 0, scale = 1, ox = 0, oy = 0, full = null;
+    var pts = new Map(), down = null, pinch = null, press = null, eatUntil = 0;
+    var PAN = { ArrowLeft: [1, 0], ArrowRight: [-1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] };
+    var DRAWN = ['fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'opacity', 'font-size', 'font-family', 'font-weight',
+                 'text-anchor', 'visibility', 'display'];
+
+    // In the layer a press acts on pointerup: after a drag by finger Chromium may send no click. Enter and Space do click
+    function tool(text, key, act) {
+      var b = button('', text);
+      b.title = tr(key);
+      b.setAttribute('aria-label', tr(key));
+      b.addEventListener('pointerup', function (e) { if (!e.button) act(e); });
+      b.addEventListener('click', function (e) { if (!e.detail) act(e); });
+      bar.appendChild(b);
+      return b;
+    }
+    var minus = tool('−', 'zoom.out', function () { less(mid()); });
+    var pct = tool('100%', 'zoom.whole', function () { zoomAt(1, mid()); });
+    var plus = tool('＋', 'zoom.in', function () { more(mid()); });
+    tool('×', 'zoom.close', hide);
+    pct.className = 'talk-zoom-pct';
+
+    function place() {             // on a phone zoomed by pinch: over what is on screen, the buttons at their own size
+      if (!vv) return;
+      z.style.inset = 'auto';
+      z.style.left = vv.offsetLeft + 'px';
+      z.style.top = vv.offsetTop + 'px';
+      z.style.width = vv.width + 'px';
+      z.style.height = vv.height + 'px';
+      bar.style.transform = 'scale(' + 1 / vv.scale + ')';
+    }
+    function measure() {           // the width at 100%: what the window allows, also for an image smaller than that
+      var m = Math.min(16, z.clientWidth * .02);
+      fit = Math.min(z.clientWidth - 2 * m, (z.clientHeight - 2 * m) * ar);
+    }
+    function draw() {              // in the middle while smaller than the window, after that no gap at its edges
+      var w = fit * scale, h = w / ar, vw = z.clientWidth, vh = z.clientHeight;
+      ox = w <= vw ? (vw - w) / 2 : Math.min(0, Math.max(vw - w, ox));
+      oy = h <= vh ? (vh - h) / 2 : Math.min(0, Math.max(vh - h, oy));
+      fig.style.width = w + 'px';
+      fig.style.height = h + 'px';
+      fig.style.transform = 'translate(' + ox + 'px,' + oy + 'px)';
+      fig.style.cursor = scale >= ZOOM_MAX ? 'zoom-out' : 'zoom-in';
+      pct.textContent = Math.round(scale * 100) + '%';
+      plus.disabled = scale >= ZOOM_MAX;
+      minus.disabled = scale <= 1;
+      if (full && w * devicePixelRatio * (vv ? vv.scale : 1) > pixels) sharpen();
+    }
+    function sharpen() {           // the swap waits for the file; until then the image stays as it is
+      var url = full, mine = fig, im = new Image();
+      full = null;
+      im.src = url;
+      (im.decode ? im.decode() : Promise.resolve()).then(function () {
+        if (fig === mine) { pixels = im.naturalWidth; fig.src = url; }
+      }).catch(function () {});
+    }
+    function zoomAt(to, p) {       // the point p of the layer stays where it is
+      to = Math.min(ZOOM_MAX, Math.max(1, to));
+      ox = p[0] - (p[0] - ox) * to / scale;
+      oy = p[1] - (p[1] - oy) * to / scale;
+      scale = to;
+      draw();
+    }
+    function more(p) { zoomAt(ZOOM_STEPS.filter(function (v) { return v > scale + .01; })[0] || ZOOM_MAX, p); }
+    function less(p) { zoomAt(ZOOM_STEPS.filter(function (v) { return v < scale - .01; }).pop() || 1, p); }
+    function mid() { return [z.clientWidth / 2, z.clientHeight / 2]; }
+    function at(e) {               // where in the layer
+      var r = z.getBoundingClientRect();
+      return [e.clientX - r.left, e.clientY - r.top];
+    }
+    function span() {
+      var p = Array.from(pts.values()), a = p[0], b = p[1];
+      return { d: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, x: (a[0] + b[0]) / 2, y: (a[1] + b[1]) / 2 };
+    }
+
+    // the colour the figure lies on: a drawing without a background of its own would be lost on the dark layer
+    function under(f) {
+      for (var n = f; n; n = n.parentElement) {
+        var c = getComputedStyle(n).backgroundColor;
+        if (!/^rgba\(|^transparent/.test(c)) return c;
+      }
+      return '#fff';
+    }
+    // what the report's CSS gave a drawing by its place in the page (main svg text { ... }) stays on the copy
+    function keepStyle(from, to) {
+      var a = from.querySelectorAll('*'), b = to.querySelectorAll('*');
+      for (var i = 0; i < a.length; i++) {
+        var s = getComputedStyle(a[i]), t = getComputedStyle(b[i]);
+        for (var k = 0; k < DRAWN.length; k++) {
+          var v = s.getPropertyValue(DRAWN[k]);
+          if (t.getPropertyValue(DRAWN[k]) !== v) b[i].style.setProperty(DRAWN[k], v);
+        }
+      }
+    }
+    function sizeOf(i) {           // an image of no size of its own (an SVG file): sharp at any size
+      pixels = i.naturalWidth || Infinity;
+      ar = i.naturalWidth && i.naturalHeight ? i.naturalWidth / i.naturalHeight
+        : i.clientHeight ? i.clientWidth / i.clientHeight : 1;
+    }
+    function show(f) {
+      var mine;
+      if (f.tagName === 'IMG') {
+        mine = fig = el('img');
+        fig.alt = f.alt;
+        fig.draggable = false;
+        fig.src = f.currentSrc || f.src;
+        full = f.getAttribute('data-full');
+        sizeOf(f);
+        if (!f.naturalWidth) fig.addEventListener('load', function () {   // opened before it had loaded
+          if (fig === mine) { sizeOf(fig); measure(); draw(); }
+        });
+      } else {
+        var b = f.viewBox && f.viewBox.baseVal, r = f.getBoundingClientRect();
+        fig = f.cloneNode(true);
+        full = null;
+        ar = b && b.width && b.height ? b.width / b.height : r.width / r.height;
+        if (!(b && b.width && b.height)) {   // scales only with a viewBox; drawn in lengths the report's zoom does not change
+          fig.setAttribute('viewBox', '0 0 ' + r.width / sb.zoom + ' ' + r.height / sb.zoom);
+        }
+      }
+      fig.classList.add('talk-zoom-fig');
+      fig.style.backgroundColor = under(f);
+      z.insertBefore(fig, bar);
+      z.hidden = false;
+      if (f.tagName !== 'IMG') keepStyle(f, fig);
+      scale = 1;
+      place();
+      measure();
+      draw();
+    }
+    function hide(e) {
+      z.hidden = true;
+      if (fig) z.removeChild(fig);
+      fig = full = down = pinch = null;
+      pts.clear();
+      if (e && e.pointerType === 'touch') eatUntil = Date.now() + 500;   // the click of this tap is not for the page below
+    }
+
+    window.addEventListener('pointerdown', function (e) { press = e.pointerType === 'mouse' ? e : null; }, true);
+    window.addEventListener('click', function (e) {
+      var eaten = Date.now() < eatUntil, f = eaten || e.shiftKey || !z.hidden ? null : zoomFigure(e.target);
+      eatUntil = 0;
+      if (f && f.tagName !== 'IMG' && markAt(e)) f = null;               // a comment on a word of the drawing
+      if (!eaten && !f) return;
+      e.stopPropagation();
+      e.preventDefault();
+      if (f && !(press && Math.hypot(e.clientX - press.clientX, e.clientY - press.clientY) >= 5)) show(f);   // not a drag
+    }, true);
+    document.addEventListener('mouseover', function (e) {
+      var f = zoomFigure(e.target);
+      if (f) f.style.cursor = 'zoom-in';
+    });
+
+    z.addEventListener('click', function (e) {     // a link of a drawing stays still here
+      e.stopPropagation();
+      if (!bar.contains(e.target)) e.preventDefault();
+    });
+    z.addEventListener('pointerdown', function (e) {
+      if (e.button || bar.contains(e.target)) return;
+      z.setPointerCapture(e.pointerId);
+      var p = at(e);
+      pts.set(e.pointerId, p);
+      if (pts.size === 1) down = { p: p, ox: ox, oy: oy, hit: fig.contains(e.target), moved: false };
+      else if (pts.size === 2 && down) { down.moved = true; pinch = span(); }
+    });
+    z.addEventListener('pointermove', function (e) {
+      if (!pts.has(e.pointerId)) return;
+      var p = at(e);
+      pts.set(e.pointerId, p);
+      if (pinch && pts.size >= 2) {
+        var n = span();
+        ox += n.x - pinch.x;
+        oy += n.y - pinch.y;
+        zoomAt(scale * n.d / pinch.d, [n.x, n.y]);
+        pinch = n;
+      } else if (down) {
+        var dx = p[0] - down.p[0], dy = p[1] - down.p[1];
+        if (!down.moved && Math.hypot(dx, dy) < 5) return;
+        down.moved = true;
+        z.classList.add('talk-drag');
+        ox = down.ox + dx;
+        oy = down.oy + dy;
+        draw();
+      }
+    });
+    function release(e) {
+      if (!pts.delete(e.pointerId)) return;
+      if (pts.size === 1) {        // one of two fingers lifted: the other goes on moving it
+        down = { p: Array.from(pts.values())[0], ox: ox, oy: oy, hit: false, moved: true };
+        pinch = null;
+        return;
+      }
+      if (pts.size) return;
+      z.classList.remove('talk-drag');
+      var d = down, p = at(e);
+      down = pinch = null;
+      if (!d || d.moved || e.type !== 'pointerup') return;
+      if (!d.hit) hide(e);
+      else if (scale >= ZOOM_MAX) zoomAt(1, p);
+      else more(p);
+    }
+    z.addEventListener('pointerup', release);
+    z.addEventListener('pointercancel', release);
+    z.addEventListener('gesturestart', function (e) { e.preventDefault(); });   // iOS: not the browser's own zoom
+    z.addEventListener('wheel', function (e) {
+      e.preventDefault();
+      e.stopPropagation();         // not to the zoom of the report (Ctrl + wheel)
+      var d = -(e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY);
+      var k = e.ctrlKey ? Math.max(-25, Math.min(25, d)) * .01 : Math.max(-200, Math.min(200, d)) * .0022;
+      zoomAt(scale * Math.exp(k), at(e));
+    }, { passive: false });
+    window.addEventListener('keydown', function (e) {   // taken on the way down: not to the cards of the comments
+      if (z.hidden || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+      if (e.key === 'Escape') hide();
+      else if (e.key === '+' || e.key === ';' || e.key === '=') more(mid());
+      else if (e.key === '-') less(mid());
+      else if (e.key === '0') zoomAt(1, mid());
+      else if (PAN[e.key]) { ox += PAN[e.key][0] * 120; oy += PAN[e.key][1] * 120; draw(); }
+      else return;
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
+    function sync() { if (!z.hidden) { place(); measure(); draw(); } }
+    window.addEventListener('resize', sync);
+    if (vv) { vv.addEventListener('resize', sync); vv.addEventListener('scroll', sync); }
+
+    z.hidden = true;
+    z.setAttribute('role', 'dialog');
+    z.setAttribute('aria-modal', 'true');
+    z.appendChild(bar);
+    document.body.appendChild(z);
+    html.classList.add('talk-has-zoom');
+    zoomOn = true;
+  }
+
   // ---------------------------------------------------------------- start, and the API for pages of their own
   window.TalkPage = {
     page: page,
@@ -1484,6 +1755,7 @@
       if (SIDEBAR) content = findContent();
       buildDock();
       setupSelect();
+      if (REPORT) setupZoom();
       if (SIDEBAR) buildSidebar();
       if (SIDEBAR) loadReports();
       syncCards();
