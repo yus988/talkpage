@@ -653,7 +653,7 @@ class PlacesTest(unittest.TestCase):
 
 
 class RoundsTest(unittest.TestCase):
-    """The rounds of a theme (<theme>/<round>/<name>.html) share their comments on selected text."""
+    """The rounds of a theme (<theme>/<round>/<name>.html) keep their comments apart; the numbers stay unique."""
     R = ['20261101-1000-r1', '20261101-1100-r2', '20261102-0900-r3']
     A = {'pos': 0.5}
 
@@ -679,88 +679,37 @@ class RoundsTest(unittest.TestCase):
         with talk.cond:
             return talk.store('%s/%s/index.html' % (theme, r)).data['items']
 
-    def test_comment_and_status_reach_later_rounds(self):
+    def test_rounds_keep_their_comments(self):
         talk = tp.Talk(self.dir)
-        p1 = 'th/%s/index.html' % self.R[0]
+        p1, p3 = ('th/%s/index.html' % r for r in (self.R[0], self.R[2]))
         self.post(talk, 'user', page=p1, id='C1', title='quote', comment='fix this', anchor=self.A)
-        for r in self.R[1:]:                                       # written on r1 after r2 and r3 were made
-            it = self.items(talk, r)['C1']
-            self.assertEqual((it['carried_from'], it['thread'][0]['text'], tp.waiting(it)), (p1, 'fix this', False))
+        self.post(talk, 'agent', page=p1, id='C1', reply='done')
         self.post(talk, 'user', page=p1, id='C1', title='quote', status='Resolved', notify=False)
-        self.assertEqual([self.items(talk, r)['C1']['status'] for r in self.R], ['Resolved'] * 3)
-        self.post(talk, 'user', page='th/%s/index.html' % self.R[2], id='C1', title='quote', status='')   # reopened on r3
-        self.assertEqual([self.items(talk, r)['C1']['status'] for r in self.R], [''] * 3)
-        self.assertEqual(len(self.items(talk, self.R[0])['C1']['thread']), 3)
-        with talk.cond:                                            # pages outside rounds: nothing to share
+        for r in self.R[1:]:                                       # written on r1 after r2 and r3 were made: not copied
+            self.assertNotIn('C1', self.items(talk, r))
+        p4 = self.page('20261103-0900-r4')
+        self.assertEqual(self.items(talk, '20261103-0900-r4'), {})                  # a new round starts with none
+        self.post(talk, 'user', page=p3, id='C2', title='other', comment='c', anchor=self.A)
+        self.assertEqual(sorted(self.items(talk, self.R[0])), ['C1'])
+        self.assertEqual(self.items(talk, self.R[0])['C1']['status'], 'Resolved')
+        with talk.cond:                                            # pages outside rounds: no theme
             self.assertEqual(talk.rounds('notes/index.html'), [])
             self.assertEqual(talk.rounds('%s/index.html' % self.R[0]), [])          # the root's own round is no theme
             self.assertEqual(talk.rounds('net:/Power In/Net-(U6-EN)'), [])        # the key of an attached store
+        self.assertEqual(json.loads(talk.get('/_talk/api/state', {'page': [p4]})[1])['taken'], ['C1', 'C2'])
+        self.assertIsNone(talk.post('/_talk/api/link', {'page': p4}))       # no route to bring rounds together
 
-    def test_reply_on_a_copy_and_seen(self):
-        talk = tp.Talk(self.dir)
-        p1, p3 = ('th/%s/index.html' % r for r in (self.R[0], self.R[2]))
-        self.post(talk, 'user', page=p1, id='C1', title='quote', comment='why?', anchor=self.A)
-        self.post(talk, 'agent', page=p3, id='C1', reply='because', fields={'summary': 'asked why'})
-        it = self.items(talk, self.R[0])['C1']
-        self.assertEqual((it['thread'][-1]['text'], it['summary'], tp.waiting(it)), ('because', 'asked why', True))
-        self.post(talk, 'seen', page=p1, id='C1')
-        for r in self.R:
-            it = self.items(talk, r)['C1']
-            self.assertEqual(it['seen_rev'], tp.last_reply(it))
-
-    def test_new_round_and_start_take_the_comments(self):
-        talk = tp.Talk(self.dir)
-        p2 = 'th/%s/index.html' % self.R[1]
-        self.post(talk, 'user', page=p2, id='C1', title='quote', comment='c', anchor=self.A)
-        self.post(talk, 'user', page=p2, id='read', status='Read', notify=False)          # not a comment
-        self.post(talk, 'user', page=p2, id='A1', title='fixed', status='OK')             # a fixed element's item
-        p4 = self.page('20261103-0900-r4')
-        self.assertEqual(self.post(talk, 'link', page=p4)['changed'], {p4: ['C1']})
-        self.assertEqual(self.post(talk, 'link', page=p4)['changed'], {})
-        with talk.cond:
-            self.assertEqual(sorted(talk.store(p4).data['items']), ['C1'])                # made after: takes it in
-        self.assertNotIn('C1', self.items(talk, self.R[0]))                               # rounds before: not
-        path = os.path.join(self.dir, 'th', self.R[1], 'index.talk.json')
-        with open(path, encoding='utf-8') as f:
-            d = json.load(f)
-        d['items']['C1']['thread'].append({'who': 'user', 'status': 'Resolved', 'time': '2099-01-01 00:00:00', 'rev': 99})
-        d['items']['C1']['status'] = 'Resolved'
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(d, f)
-        again = tp.Talk(self.dir)                                                         # a server started later
-        self.assertEqual([self.items(again, r)['C1']['status'] for r in (self.R[2], '20261103-0900-r4')], ['Resolved'] * 2)
-
-    def test_link_command(self):
-        talk = tp.Talk(self.dir)
-        self.post(talk, 'user', page='th/%s/index.html' % self.R[0], id='C1', title='quote', comment='c', anchor=self.A)
-        self.page('20261103-0900-r4')
-        srv = tp.Server(('127.0.0.1', 0), type('H', (tp.Handler,), {'talk': talk}))
-        talk.port = srv.server_address[1]
-        threading.Thread(target=srv.serve_forever, kwargs={'poll_interval': 0.05}, daemon=True).start()
-        try:
-            r = subprocess.run([sys.executable, '-m', 'talkpage', '--port', str(talk.port), 'link', '--page', 'r4'],
-                               env=ENV, capture_output=True, text=True, encoding='utf-8', timeout=30)
-        finally:
-            srv.shutdown()
-            srv.server_close()
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn('th/20261103-0900-r4/index.html  4 round(s)', r.stdout)
-        self.assertIn('  th/20261103-0900-r4/index.html: C1', r.stdout)
-
-    def test_same_id_of_another_comment(self):
-        talk = tp.Talk(self.dir)
+    def test_old_copies_stay_as_they_are(self):
+        """A copy made by the servers that shared the comments is the round's own item now."""
         p1, p2 = ('th/%s/index.html' % r for r in self.R[:2])
-        with talk.cond:                                            # r2 already has a C2 of its own
-            talk.store(p2).user('C2', 'on r2', comment='b', anchor=self.A)
-        self.post(talk, 'user', page=p1, id='C2', title='on r1', comment='a', anchor=self.A)
-        r2, r3 = self.items(talk, self.R[1]), self.items(talk, self.R[2])
-        self.assertEqual((r2['C2']['title'], r2['C3']['title'], r2['C3']['carried_id']), ('on r2', 'on r1', 'C2'))
-        self.assertEqual(r3['C3']['title'], 'on r1')
-        self.post(talk, 'user', page=p2, id='C3', title='on r1', status='Resolved', notify=False)
-        self.assertEqual(self.items(talk, self.R[0])['C2']['status'], 'Resolved')
-        self.assertEqual(r2['C2']['status'], '')
-        state = json.loads(talk.get('/_talk/api/state', {'page': [p1]})[1])
-        self.assertEqual(state['taken'], ['C2', 'C3'])
+        write(self.dir, 'th/%s/index.talk.json' % self.R[1], json.dumps({'page': p2, 'rev': 3, 'items': {'C1': {
+            'title': 'quote', 'status': '', 'carried_from': p1, 'user_rev': 0, 'agent_rev': 0, 'seen_rev': 0,
+            'thread': [{'who': 'user', 'text': 'old', 'time': 't', 'rev': 1}]}}}))
+        talk = tp.Talk(self.dir)
+        self.post(talk, 'user', page=p2, id='C1', title='quote', status='Resolved', notify=False)
+        self.assertEqual(self.items(talk, self.R[1])['C1']['status'], 'Resolved')
+        self.assertNotIn('C1', self.items(talk, self.R[0]))
+        self.assertNotIn('C1', self.items(talk, self.R[2]))
 
     def test_rounds_of_a_place(self):
         top = tempfile.mkdtemp()
@@ -781,8 +730,8 @@ class RoundsTest(unittest.TestCase):
             for place, theme in (('notes', 'motor'), ('props', '')):
                 path = '/'.join(x for x in (place, theme, self.R[1], 'index.html') if x)
                 with talk.cond:
-                    self.assertEqual(talk.store(path).data['items']['C1']['thread'][0]['text'],
-                                     'c' if theme else 'd')
+                    self.assertEqual(talk.store(path).data['items'], {})
+                self.assertEqual(json.loads(talk.get('/_talk/api/state', {'page': [path]})[1])['taken'], ['C1'])
         finally:
             shutil.rmtree(top)
 

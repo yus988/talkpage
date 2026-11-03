@@ -370,35 +370,28 @@ the next time it is read; deleting the file starts the page over, even while the
 - `user_rev`: the revision of the user's last action the agent is told about; `agent_rev`: of the agent's last reply
   or ack. While `user_rev > agent_rev` the item is "Unread by agent"
 - `seen_rev`: the revision of the agent's last message the user has read
-- `carried_from`, `carried_id` (an item copied from another round): the page it was first written on and its id there
-  (no `carried_id` when the id is the same); see "Comments across rounds"
+- `carried_from`, `carried_id` (an item an older server copied from another round): the page it was first written on
+  and its id there. The server no longer reads them; see "Rounds and comments"
 - `anchor` (a comment on selected text): `{"heads": [the headings above the text, outer first], "id": the closest
   element with an id, "pos": its share of the way down the text, 0-1}`. It places the card near its old place once
-  the text has changed; a tool that carries comments to a new round can write the same
+  the text has changed; a tool that finds the place of an older comment again can write the same
 - `edits` (top level): the user's fixes of the text with "Edit", `[{"time", "tag", "before", "after"}]` (text with
   white space squashed, up to 300 characters; the last 200)
 - Other keys (an item's `fields`, your own top-level keys) are kept as they are
 
-## Comments across rounds
+## Rounds and comments
 
-The rounds of a theme (`<theme>/<YYYYMMDD-HHMM-rN>/index.html`; a new round is made by copying the last one) share
-their comments on selected text (`C1`, `C2`…). It works without `--reports` too, for folders of that shape.
+The rounds of a theme (`<theme>/<YYYYMMDD-HHMM-rN>/index.html`; a new round is made by copying the last one, once
+every comment on it is resolved) keep their comments apart. It works without `--reports` too, for folders of that
+shape.
 
-1. A comment is copied to the rounds after the one it was written on. A comment written later on an old round reaches
-   the newer rounds too
-2. A reply, a comment or a status (`status`) given on any round reaches the same comment on the other rounds. The
-   status follows the latest status change: a comment marked "Resolved" on r4 is resolved on r5 and r6 too
-3. A copied item has `carried_from` (the page it was first written on) and, when the id differs, `carried_id` (its id
-   there). When the id is used by another comment of a later round, the copy takes the next number the theme does
-   not use. A new comment also takes a number none of the theme's other rounds uses (`taken` in `state`)
-4. The server links a theme's rounds when it starts and when a page of a new round is first asked for.
-   `talkpage link --page <page of the new round>` does it at once (and prints the pages and ids it copied or brought
-   in line)
-5. Copies do not wait for the agent (only the round the user wrote on shows "unread"). That the user read a reply
-   reaches the other rounds too
-6. This covers comments on selected text that have an `anchor` or were copied from another round. The items of fixed
-   elements and "Read" (`read`) stay per round
-7. Under `--place`, rounds directly in a folder are one theme too (the folder itself is the theme)
+1. A comment, its replies and its status (`status`) stay on the round they were written on. A new round starts with
+   no comments
+2. A new comment takes a number none of the theme's other rounds uses (`taken` in `state`), so that `C12` names one
+   comment of the theme
+3. Comments an older server copied across rounds (items with `carried_from`) stay as the round's own items; they are
+   no longer kept in line with the other rounds
+4. Under `--place`, rounds directly in a folder are one theme too (the folder itself is the theme)
 
 ## HTTP API
 
@@ -417,7 +410,6 @@ send `Origin: http://127.0.0.1:<port>` (see "Safety").
 | `POST /_talk/api/agent` `{page, id, reply?, status?, fields?}` | The agent's reply (creates the item if needed). Clears "unread" |
 | `POST /_talk/api/ack` `{page?, ids?}` | Clears "unread" without a reply (without `ids`: the whole page; without `page`: all pages) |
 | `POST /_talk/api/edit` `{page, tag, text, nth, count?, html, after?}` | The user's fix of the text (sent by the page's "Edit"). Of the elements `tag` (`p`, `li`, `h1`–`h6`, `td`, `th`, `dt`, `dd`, `figcaption`, `caption`, `blockquote`) whose text (white space squashed) is `text`, the `nth` (from 0; none inside `data-talk`, `template` or `noscript` counted) gets the content `html` in the file, and the fix is kept in the state's `edits`. Nothing is written (400) when `count` (how many the page counted) differs from the file, when an element of that tag has no end tag, or when `html` holds scripts, embedding, `on…=` or `javascript:`. Does not wake the agent |
-| `POST /_talk/api/link` `{page}` | Links the rounds of the page's theme ("Comments across rounds"). `changed` lists the pages and ids it copied or brought in line |
 | `GET /_talk/talkpage.js` `/_talk/talkpage.css` | The page side |
 
 `page` of agent, ack, state and pending may be a part of a path that matches a single page (among the pages with a

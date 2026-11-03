@@ -588,7 +588,7 @@
   }
 
   // ---------------------------------------------------------------- reports: comments on selected text
-  // A card sits beside its text, found again by the item's title. When the text has changed (a new round, an edit),
+  // A card sits beside its text, found again by the item's title. When the text has changed (an edit, a rebuild),
   // the card goes near its old place, by most of the text or by the item's anchor (its headings, the element with an
   // id, its share of the way down); only a comment with nothing to go by is listed at the end of the report.
   // talkpage's own parts: their text is not the report's, and a selection in them is not a comment
@@ -672,7 +672,7 @@
 
   // where a comment's text is, kept with its item (the field anchor) to place the card once the text has changed: the
   // headings it is under (outer first), the closest element with an id, and its share of the way down the text. A tool
-  // that carries comments to a new round of a report can write the same
+  // that finds the place of an older comment again can write the same
   function anchorOf(s, range, ix) {
     var start = range.startContainer, stack = [];
     headings(s.root).forEach(function (h) {

@@ -8,7 +8,6 @@
   python talkpage.py reply --page P --id ID [--status S] [--text T | --text - | --file F] [--fields JSON] [--summary S]
   python talkpage.py ack   [--page P] [--id ID ...]
   python talkpage.py show  [--page P]
-  python talkpage.py link  --page P
   python talkpage.py reports [list | owner THEME NAME ID | read THEME... | read all | unread THEME... | open [--owner S]]
 
 serve: <root> holds the pages; the state of <dir>/<name>.html is kept beside it in <dir>/<name>.talk.json. Only
@@ -17,9 +16,8 @@ the fix in the state (edits). wait: blocks until the user acts on a page, prints
 runs it in the background (Claude Code: Bash run_in_background) so that the exit wakes it. reply: answer an item (the
 reply shows on the page). ack: mark what was printed as read without replying. show: all items of a page, and the
 user's fixes of its text (`~ edit` lines: an agent that builds the page again takes them into its source first).
-The rounds of a theme (<theme>/<round>/index.html) share their comments on selected text: the server copies a comment
-to the later rounds and keeps the messages and the status of every copy the same. link: a new round takes in the
-comments of the rounds before it now (else when a page of it is first asked for).
+The rounds of a theme (<theme>/<round>/index.html) keep their comments apart (a round is made once every comment of
+the last one is resolved); a new comment takes a number that no other round of the theme has.
 P is a page path under the root or a unique part of one. --port defaults to $TALKPAGE_PORT or 8190. --lang: the
 language of the server's own index page (default: $TALKPAGE_LANG, else ja for a Japanese OS, else en); talkpage.js
 follows the <html lang> of each page. The page side is talkpage.js / talkpage.css (served at /_talk/); see README.md.
@@ -604,19 +602,8 @@ def last_reply(it):
     return max([m.get('rev', 0) for m in it['thread'] if m.get('who') == 'agent' and m.get('text')] or [0])
 
 
-# ---------------------------------------------------------------- the rounds of a theme share their comments
+# ---------------------------------------------------------------- the rounds of a theme
 COMMENT_ID = re.compile(r'^([A-Za-z]+)(\d+)$')      # comments on selected text: C1, C2... (talkpage.js nextId)
-OWN = ('carried_from', 'carried_id', 'anchor')      # fields of one round's copy of a comment, not taken from another
-
-
-def comment(iid, it):
-    """A comment on selected text, not the item of a fixed element: it has the hints of its place (talkpage.js sends
-    them with the first comment) or came from another round (a tool that carries comments to a new round)."""
-    return bool(COMMENT_ID.match(iid) and it.get('title') and (it.get('anchor') or it.get('carried_from')))
-
-
-def message_key(m):
-    return m.get('who'), m.get('time'), m.get('text'), m.get('status')
 
 
 # ---------------------------------------------------------------- the user's fixes of a page's text (Edit on the page)
@@ -865,39 +852,6 @@ class Store:
         self._next()
         self.save()
 
-    def merge(self, k, src, key):
-        """Take in another round's copy src of the comment named key (Talk.origin), as item k (made when missing):
-        the messages this copy lacks (at a revision of this page), the fields, and the status the latest status
-        message set. The copy does not wait for the agent by it, and has read the replies when they were read there.
-        Returns whether anything changed."""
-        it = self.data['items'].get(k)
-        made = it is None
-        if made:
-            it = {'status': '', 'thread': [], 'user_rev': 0, 'agent_rev': 0, 'seen_rev': 0, 'carried_from': key[0]}
-            if key[1] != k:
-                it['carried_id'] = key[1]
-        have = {message_key(m) for m in it['thread']}
-        add = [m for m in src['thread'] if message_key(m) not in have]
-        fields = {f: v for f, v in src.items() if f not in RESERVED + OWN and it.get(f) != v}
-        if src.get('anchor') and not it.get('anchor'):
-            fields['anchor'] = src['anchor']
-        thread = sorted(it['thread'] + add, key=lambda m: m.get('time', ''))          # stable: same second, same order
-        marks = [m for m in thread if 'status' in m and 'text' not in m]
-        status = marks[-1]['status'] if marks else src['status']
-        read = last_reply(src) <= src.get('seen_rev', 0)
-        if not (made or add or fields or status != it['status'] or read and last_reply(it) > it['seen_rev']):
-            return False
-        rev = self._next()
-        self.data['items'][k] = it
-        it.update(fields)
-        new = {id(m) for m in add}
-        it['thread'] = [dict(m, rev=rev) if id(m) in new else m for m in thread]
-        it['status'] = status
-        if read:
-            it['seen_rev'] = max(it['seen_rev'], last_reply(it))
-        self.save()
-        return True
-
     def seen(self, iid):
         it = self.item(iid)
         last = last_reply(it)
@@ -978,8 +932,6 @@ class Talk:
         self.last_listen = 0.0                 # end of the last one
         self.taken_at = 0.0                    # when a `wait` last took items (the agent is working on them)
         self.last_user_at = 0.0
-        self.linking = False                   # link() at work: the stores it opens do not link again
-        self.changes = None                    # {page: ids} the copies spread() changed, kept for /_talk/api/link
         self.scan()
         threading.Thread(target=self._watch_presence, daemon=True).start()
 
@@ -1167,16 +1119,9 @@ class Talk:
                             self.stores[page] = Store(os.path.join(d, f), page)
                         except (OSError, ValueError) as e:
                             print('talkpage: skipped %s: %s' % (os.path.join(d, f), e), file=sys.stderr)
-        done = set()
-        for page in sorted(self.stores):
-            pages = self.rounds(page)
-            if pages and pages[0] not in done:
-                done.add(pages[0])
-                self.link(page)
 
-    # A theme's rounds (<theme>/<round>/index.html, a new round made from the last one) share the comments on
-    # selected text: a comment written on a round is copied to the rounds after it, and a status or a message on one
-    # copy reaches all the others. So a comment resolved on r4 is resolved on r5 and r6 too.
+    # A theme's rounds (<theme>/<round>/index.html, a new round made from the last one once every comment on it is
+    # resolved) keep their comments apart; only the numbers stay unique over the theme, so that C12 names one comment.
     def rounds(self, page):
         """The pages of the same name in every round of page's theme, oldest first; [] for a page outside rounds
         (under --place the place's own rounds count: the place is the theme)."""
@@ -1194,79 +1139,13 @@ class Talk:
             return []
         return ['/'.join(parts[:-2] + [d, parts[-1]]) for d in sorted(names, key=natural)]
 
-    def origin(self, page, iid, it):
-        """What names a comment in every round: the page it was first written on and its id there. A copy names the
-        round it was copied from, which may itself be a copy: followed back to the first."""
-        key, seen = (page, iid), set()
-        while it is not None and it.get('carried_from') and key not in seen:
-            seen.add(key)
-            key = (it['carried_from'], it.get('carried_id') or key[1])
-            s = self.stores.get(key[0])
-            it = s.data['items'].get(key[1]) if s else None
-        return key
-
-    def find(self, s, key):
-        """The id of s's copy of the comment named key, or None."""
-        if key[0] == s.page and key[1] in s.data['items']:
-            return key[1]                      # the page it was written on (an old one may have no hints of its place)
-        for k, it in s.data['items'].items():
-            if comment(k, it) and self.origin(s.page, k, it) == key:
-                return k
-        return None
-
-    def ids(self, pages, but=None):
-        """{id: the comments (origin()) and other items that use it} over pages, but the page `but`."""
-        out = {}
-        for p in pages:
-            s = self.stores.get(p) if p != but else None
-            for k, it in (s.data['items'].items() if s else ()):
-                if COMMENT_ID.match(k):
-                    out.setdefault(k, set()).add(self.origin(p, k, it))
-        return out
-
-    def spread(self, s, iid):
-        """After a change of a comment on s: its copies in the other rounds take it in, and the rounds after s that
-        lack it get one, under the same id unless another comment of the theme has that id. Callers hold self.cond."""
-        it = s.data['items'].get(iid)
-        pages = self.rounds(s.page)
-        if not it or not comment(iid, it) or s.page not in pages:
-            return
-        stores = [self.store(p) for p in pages]                 # all of them: the chains of copies, the ids in use
-        key, after, new_id = self.origin(s.page, iid, it), False, None
-        for p, t in zip(pages, stores):
-            if p == s.page:
-                after = True
-                continue
-            k = self.find(t, key)
-            if k is None:
-                if not after:
-                    continue
-                if new_id is None:
-                    used = self.ids(pages)
-                    clash = {i for i, keys in used.items() if keys - {key}}
-                    new_id = key[1]
-                    if new_id in clash or new_id in t.data['items']:
-                        head = COMMENT_ID.match(key[1]).group(1)
-                        new_id = '%s%d' % (head, 1 + max([int(m.group(2)) for m in map(COMMENT_ID.match, used)
-                                                          if m.group(1) == head] or [0]))
-                k = new_id
-            if t.merge(k, it, key) and self.changes is not None:
-                self.changes.setdefault(p, set()).add(k)
-
-    def link(self, page):
-        """Bring together the comments of the rounds of page's theme (at the start, and when a round is first seen):
-        each round in turn, oldest first, spreads its comments. Callers hold self.cond, or nobody else runs yet."""
-        pages = self.rounds(page)
-        if len(pages) < 2 or self.linking:
-            return
-        self.linking = True
-        try:
-            for p in pages:
-                s = self.store(p)
-                for k in sorted(s.data['items'], key=natural):
-                    self.spread(s, k)
-        finally:
-            self.linking = False
+    def taken(self, page):
+        """The ids of the comments on the theme's other rounds: a new comment on page takes a number none of them has."""
+        out = set()
+        for p in self.rounds(page):
+            s = self.stores.get(p) if p != page else None
+            out.update(k for k in (s.data['items'] if s else ()) if COMMENT_ID.match(k))
+        return sorted(out, key=natural)
 
     def html_pages(self):
         out = []
@@ -1326,12 +1205,9 @@ class Talk:
             if p not in self.stores:
                 p, full = self.page_file(p)
         s = self.stores.get(p)
-        made = s is None
-        if made:
+        if s is None:
             s = self.stores[p] = Store(os.path.splitext(full)[0] + '.talk.json', p)
         s.fresh()
-        if made:
-            self.link(p)                       # a new round: it gets the comments of the rounds before it
         return s
 
     def presence(self):
@@ -1379,9 +1255,7 @@ class Talk:
                 if wait > 0:
                     self.cond.wait_for(lambda: s.data['rev'] != rev or pres is not None and self.presence() != pres,
                                        wait)
-                # the ids of the other rounds' comments: a new comment here takes a number none of them has
-                taken = sorted(self.ids(self.rounds(s.page), but=s.page), key=natural)
-                return 200, dump(dict(s.view(), presence=self.presence(), taken=taken))
+                return 200, dump(dict(s.view(), presence=self.presence(), taken=self.taken(s.page)))
         if path == '/_talk/api/pending':
             return 200, self.pending(one('page'), min(float(one('wait', 0)), 55), one('listen') == '1',
                                      one('take') == '1')
@@ -1434,31 +1308,18 @@ class Talk:
                 return 200, dump(self.mark(body.get('page'), body.get('star'), body.get('tags'), body.get('hidden')))
             if path == '/_talk/api/edit':
                 return self.edit(body)
-            if path == '/_talk/api/link':                      # a new round: take in the comments of the ones before
-                self.changes = {}
-                try:
-                    s = self.store(body.get('page'), loose=True)          # a round seen for the first time links here
-                    self.link(s.page)
-                    changed = {p: sorted(ids, key=natural) for p, ids in sorted(self.changes.items())}
-                finally:
-                    self.changes = None
-                self.cond.notify_all()
-                return 200, dump({'page': s.page, 'rounds': self.rounds(s.page), 'changed': changed})
             if path == '/_talk/api/user':
                 s = self.store(body.get('page'))
                 it = s.user(body.get('id'), body.get('title'), body.get('status'), body.get('comment'),
                             body.get('notify', True) is not False, body.get('anchor'))
                 if it['user_rev'] == s.data['rev']:
                     self.last_user_at = time.time()
-                self.spread(s, body.get('id'))
             elif path == '/_talk/api/seen':
                 s = self.store(body.get('page'))
                 it = s.seen(body.get('id'))
-                self.spread(s, body.get('id'))
             elif path == '/_talk/api/agent':
                 s = self.store(body.get('page'), loose=True)
                 it = s.agent(body.get('id'), body.get('reply'), body.get('status'), body.get('fields'))
-                self.spread(s, body.get('id'))
             elif path == '/_talk/api/ack':
                 ids = body.get('ids')
                 if ids is not None and not (isinstance(ids, list) and all(isinstance(i, str) for i in ids)):
@@ -1885,13 +1746,6 @@ def cmd_show(a):
             print('~ edit %s <%s>  %s  ->  %s' % (e['time'][5:16], e['tag'], e['before'][:100], e['after'][:100]))
 
 
-def cmd_link(a):
-    r = call(a, '/_talk/api/link', {'page': a.page})
-    print('talkpage: %s  %d round(s)' % (r['page'], len(r['rounds'])))
-    for p, ids in r['changed'].items():
-        print('  %s: %s' % (p, ', '.join(ids)))
-
-
 def reports_data(a):
     """(info, /_talk/api/reports) of a server run with --reports, or SystemExit with the reason."""
     try:
@@ -2032,8 +1886,6 @@ def main():
     s.add_argument('--id', action='append', help='only these items (repeat)')
     s = sub.add_parser('show', help="all items of a page, and the user's fixes of its text (~ edit)")
     s.add_argument('--page')
-    s = sub.add_parser('link', help="a new round takes in the comments of the theme's rounds before it")
-    s.add_argument('--page', required=True)
     s = sub.add_parser('reports', help='the reports of a server run with --reports')
     s.add_argument('action', nargs='?', default='list', choices=('list', 'owner', 'read', 'unread', 'open'))
     s.add_argument('args', nargs='*')
@@ -2042,7 +1894,7 @@ def main():
         sp.add_argument('--port', type=int, default=argparse.SUPPRESS)
     a = p.parse_args()
     {'serve': cmd_serve, 'wait': cmd_wait, 'reply': cmd_reply, 'ack': cmd_ack, 'show': cmd_show,
-     'link': cmd_link, 'reports': cmd_reports}[a.cmd](a)
+     'reports': cmd_reports}[a.cmd](a)
 
 
 if __name__ == '__main__':
