@@ -1,4 +1,5 @@
 """Tests of talkpage: the store, the HTTP routes and the wait / reply commands. python -m unittest discover tests"""
+import concurrent.futures
 import http.client
 import json
 import os
@@ -147,6 +148,24 @@ class HttpTest(unittest.TestCase):
         self.assertIn(b'<html lang="en">', body)                    # the index page in the server's language
         self.assertIn(b'Only pages with a state are listed', body)
         self.assertEqual(self.req('/_talk/api/info')[1]['lang'], 'en')
+
+    def test_1a_many_connections_at_once(self):
+        """Through Tailscale serve (HTTP/2) a page's images arrive together, each on a new connection: none is refused."""
+        n = 48
+        gate = threading.Barrier(n)
+
+        def one(_):
+            gate.wait(10)
+            c = http.client.HTTPConnection('127.0.0.1', self.port, timeout=10)
+            try:
+                c.request('GET', '/notes/r1/')
+                return c.getresponse().status
+            finally:
+                c.close()
+
+        with concurrent.futures.ThreadPoolExecutor(n) as pool:
+            for _ in range(5):
+                self.assertEqual(set(pool.map(one, range(n))), {200})
 
     def test_2_guards(self):
         self.assertEqual(self.req('/_talk/api/info', headers={'Host': 'evil.example:%d' % self.port})[0], 403)

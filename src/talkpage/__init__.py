@@ -1233,6 +1233,9 @@ class Handler(BaseHTTPRequestHandler):
 class Server(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = os.name != 'nt'     # on Windows SO_REUSEADDR would let two servers share the port
+    # Through Tailscale serve (HTTP/2) a page's images arrive together, each on a new connection. With the default of
+    # 5 waiting connections Windows refuses the rest, and the browser gets 502 for them.
+    request_queue_size = 128
 
     def handle_error(self, request, client_address):
         if not isinstance(sys.exc_info()[1], ConnectionError):
