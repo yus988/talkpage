@@ -94,7 +94,7 @@
       'sb.basis': 'Show or hide the work reports it is based on',
       'sb.based': 'submitted with {r}',
       'sb.nobasis': 'No report of its basis is found',
-      'sb.otherbasis': 'Based on other owners' reports only (they are in their own groups)',
+      'sb.otherbasis': "Based on other owners' reports only (they are in their own groups)",
       'sb.missing': 'Not found: {x}',
       'read.title': 'Did you read this report',
       'read.note': 'Press Read when you are done. Select text in the report to comment on it.',
