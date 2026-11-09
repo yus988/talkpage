@@ -3,8 +3,9 @@
    data-copy get a copy button. Loaded from the server at /_talk/talkpage.js; see README.md. The text is English or
    Japanese by the page's <html lang> (else the browser's language).
    Reports (data-talk-report on this <script> or on <body>): the user selects text of the report to comment on it (a
-   card in the right margin), a sidebar lists the reports (/_talk/api/reports) and the headings of the page, and a
-   "read" item ends the report. data-talk-select="<prefix>" and <body data-talk-sidebar> give those parts alone. */
+   small pin right of the text opens its card), a sidebar lists the reports (/_talk/api/reports) and the headings of
+   the page, and a "read" item ends the report. data-talk-select="<prefix>" and <body data-talk-sidebar> give those
+   parts alone. */
 (function () {
   'use strict';
   var API = '/_talk/api/';
@@ -66,9 +67,9 @@
       'restore': 'Restore',
       'delete': 'Delete',
       'expand': 'Show the whole thread',
-      'close': 'Close',
       'lost': 'Comments not found in the text',
       'moved': 'The text has changed: shown near its old place (it was “{q}”)',
+      'pin.title': '{id} “{q}”',
       'dock.resolved': 'Resolved {n}',
       'dock.resolved.title': 'Show or hide the resolved comments',
       'sb.toggle': 'Show or hide the sidebar',
@@ -76,7 +77,7 @@
       'sb.zoomin': 'Larger text',
       'sb.zoomreset': 'Back to 100%',
       'sb.fit': 'Fit',
-      'sb.fit.title': 'Fit the report between the sidebar and the comments',
+      'sb.fit.title': 'Fit the report to the room right of the sidebar',
       'sb.grip': 'Drag to change the width',
       'sb.reports': 'Reports',
       'sb.all': 'All reports (stars, tags)',
@@ -150,9 +151,9 @@
       'restore': '戻す',
       'delete': '削除',
       'expand': 'やりとりの全文表示',
-      'close': '閉じる',
       'lost': '本文で見つからないコメント',
       'moved': '本文が変わったため、近い場所に表示（元の文：「{q}」）',
+      'pin.title': '{id}「{q}」',
       'dock.resolved': '解決済み {n}',
       'dock.resolved.title': '解決済みのコメントの表示の切り替え',
       'sb.toggle': 'サイドバーの表示の切り替え',
@@ -160,7 +161,7 @@
       'sb.zoomin': '本文の拡大',
       'sb.zoomreset': '100% に戻す',
       'sb.fit': '全幅',
-      'sb.fit.title': 'サイドバーとコメントの間の幅に本文を合わせる',
+      'sb.fit.title': 'サイドバーの右の空きに本文の幅を合わせる',
       'sb.grip': 'ドラッグで幅の変更',
       'sb.reports': 'レポート',
       'sb.all': 'レポートの一覧（スター・タグ）',
@@ -590,14 +591,15 @@
   }
 
   // ---------------------------------------------------------------- reports: comments on selected text
-  // A card sits beside its text, found again by the item's title. When the text has changed (an edit, a rebuild),
-  // the card goes near its old place, by most of the text or by the item's anchor (its headings, the element with an
-  // id, its share of the way down); only a comment with nothing to go by is listed at the end of the report.
+  // A comment is a small pin right of the report's column, beside its text, found again by the item's title; its card
+  // opens under the text. When the text has changed (an edit, a rebuild), the pin goes near its old place, by most of
+  // the text or by the item's anchor (its headings, the element with an id, its share of the way down); only a comment
+  // with nothing to go by is listed, as a card, at the end of the report.
   // talkpage's own parts: their text is not the report's, and a selection in them is not a comment
   var OURS = '.talk-ui, .talk-bar, .talk-thread, .talk-dock, .talk-copy-btn, .talk-copied';
   var SKIP = OURS + ', script, style, noscript, textarea, template';
-  var CARD_MAX = 340, MARGIN_MIN = 240, CARD_GAP = 8;
-  var scopes = [];          // {root, prefix, re, lost, lostList, ix, dirty, pins}: where selecting text makes a comment
+  var GAP = 36, CARD_W = 320;    // the gap on each side of the report (a pin fits in the right one); a card's width
+  var scopes = [];          // {root, prefix, re, lost, lostList, ix, dirty}: where selecting text makes a comment
   var cards = {};           // id -> comment card of an item <prefix><number> the server keeps
   var drafts = [];          // the cards of comments not sent yet (not on the server)
   var openNow = null, big = null, showResolved = false;
@@ -765,9 +767,10 @@
     var p = locate(s, ix, c.title, it.anchor);
     c.range = p ? p.range : null;
     c.near = p ? p.near : '';
-    c.idEl.textContent = c.pin.textContent = (c.near ? '≈' : '') + c.id;
+    c.idEl.textContent = (c.near ? '≈' : '') + c.id;
     c.el.classList.toggle('talk-rcard-moved', !!c.near);
     c.el.title = c.near ? tr('moved', { q: c.title }) : '';
+    paintPin(c);
     // a comment from before anchors were kept: note where its text is while it is still there, for a later change
     if (p && !p.near && items[c.id] && !it.anchor && !c.anchoring) {
       c.anchoring = true;
@@ -839,10 +842,15 @@
     form.appendChild(c.ta);
     [c.lines, form].forEach(function (x) { c.body.appendChild(x); });
     [head, c.quote, c.sum, c.body].forEach(function (x) { c.el.appendChild(x); });
-    c.pin = button('talk-ui talk-pin', id);
+    // the pin right of the report: a speech bubble and the number of messages; it opens and closes the card
+    c.pin = button('talk-ui talk-pin', '');
+    c.pin.appendChild(bubble());
+    c.pinN = el('span', 'talk-pin-n');
+    c.pin.appendChild(c.pinN);
+    c.pin.setAttribute('aria-expanded', 'false');
+    // a closed card (in the list of comments not found) opens by a click on it; an open one stays as it is
     c.el.addEventListener('click', function (e) {
-      if (e.target.closest('button, textarea, a')) return;
-      if (!c.open) openCard(c); else openBig(c);
+      if (!c.open && !e.target.closest('button, textarea, a')) openCard(c);
     });
     c.bub.addEventListener('click', function () {
       if (c.draft) c.ta.focus({ preventScroll: true });
@@ -850,7 +858,10 @@
       else openCard(c);
     });
     c.expand.addEventListener('click', function () { openBig(c); });
-    c.pin.addEventListener('click', function () { openBig(c); });
+    c.pin.addEventListener('click', function () {
+      if (c.open) closeCard(c);
+      else { openCard(c); reveal(c); }
+    });
     c.send.addEventListener('click', function () { sendCard(c, c.ta); });
     c.ta.addEventListener('keydown', function (e) {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); sendCard(c, c.ta); }
@@ -882,10 +893,13 @@
     try { if (c.ta.value) localStorage.setItem(c.draftKey, c.ta.value); else localStorage.removeItem(c.draftKey); } catch (e) {}
   }
 
+  // a message in an open card, whole (the thread scrolls inside the card when long)
   function line(m) {
     var d = el('div', 'talk-rcard-line talk-' + (m.who === 'agent' ? 'agent' : 'user'));
     d.appendChild(el('span', 'talk-who', tr(m.who === 'agent' ? 'who.agent' : 'who.user') + '  ' + when(m.time)));
-    d.appendChild(el('span', 'talk-rcard-text', m.text ? firstLine(m.text) : (m.status || tr('cleared'))));
+    var t = el('div', 'talk-rcard-text');
+    if (m.text) fmt(m.text, t); else t.textContent = m.status || tr('cleared');
+    d.appendChild(t);
     return d;
   }
 
@@ -910,9 +924,20 @@
     c.res.textContent = tr(c.draft ? 'delete' : c.resolved ? 'restore' : 'resolve');
     c.el.classList.toggle('talk-done', c.resolved);
     c.el.classList.toggle('talk-open', c.open);
-    c.pin.classList.toggle('talk-pin-new', c.unread);      // a reply never opens a card: the page stays still
+    paintPin(c);                                           // a reply never opens a card: the page stays still
     if (big && big.c === c) renderBig();
     seen(c);
+  }
+
+  // the pin: the number of messages; filled while the agent's reply is unread, dashed while not sent yet. Its tooltip
+  // holds the id, the commented text and the agent's summary
+  function paintPin(c) {
+    var it = items[c.id] || {};
+    c.pinN.textContent = c.count.textContent;
+    c.pin.title = tr('pin.title', { id: c.idEl.textContent, q: c.title }) + (it.summary ? '\n' + it.summary : '');
+    c.pin.setAttribute('aria-label', c.idEl.textContent + ' ' + tr('comment'));
+    c.pin.setAttribute('data-m', c.draft ? 'draft' : c.unread ? 'new' : '');
+    c.pin.classList.toggle('talk-done', !!c.resolved);
   }
 
   // cards for the items of the server the page does not declare
@@ -921,7 +946,8 @@
     drafts.forEach(function (d) {
       if (!items[d.id]) return;                             // taken meanwhile (another tab): renumber the draft
       d.id = nextId(d.scope.prefix);
-      d.idEl.textContent = d.pin.textContent = d.id;
+      d.idEl.textContent = d.id;
+      paintPin(d);
     });
     Object.keys(items).forEach(function (id) {
       if (cards[id] || ui[id]) return;
@@ -932,12 +958,14 @@
     relayout();
   }
 
+  // one card open at a time, under its text
   function openCard(c) {
     if (openNow && openNow !== c) closeCard(openNow);
     openNow = c;
     c.open = true;
     c.el.classList.add('talk-open');
     c.bub.setAttribute('aria-expanded', 'true');
+    c.pin.setAttribute('aria-expanded', 'true');
     paintMarks();
     relayout();
     seen(c);
@@ -947,9 +975,19 @@
     c.open = false;
     c.el.classList.remove('talk-open');
     c.bub.setAttribute('aria-expanded', 'false');
+    c.pin.setAttribute('aria-expanded', 'false');
     if (openNow === c) openNow = null;
     paintMarks();
     relayout();
+  }
+
+  // the open card in sight: the page scrolls up by what of it is below the window, but never past its text
+  function reveal(c) {
+    layout();
+    if (!c.open || !c.range) return;
+    var below = c.el.getBoundingClientRect().bottom + 8 - window.innerHeight;
+    var d = Math.min(below, c.range.getBoundingClientRect().top - 8);
+    if (d > 0) window.scrollBy({ top: d, behavior: 'smooth' });
   }
 
   function newDraft(x) {
@@ -966,12 +1004,9 @@
     selBtn.hidden = true;
     getSelection().removeAllRanges();
     renderCard(c);
-    openNow = c;
-    c.open = true;
-    c.el.classList.add('talk-open');
-    c.bub.setAttribute('aria-expanded', 'true');
-    layout();
-    if (s.pins) openBig(c); else c.ta.focus({ preventScroll: true });
+    openCard(c);
+    reveal(c);
+    c.ta.focus({ preventScroll: true });
   }
 
   // a draft stays until it is sent or its "delete" is pressed, also with nothing written (one talks to the voice input
@@ -980,7 +1015,7 @@
     var i = drafts.indexOf(c);
     if (i < 0 || c.busy) return;
     drafts.splice(i, 1);
-    if (big && big.c === c) closeBig(true);
+    if (big && big.c === c) closeBig();
     if (openNow === c) openNow = null;
     [c.el, c.pin].forEach(function (x) { if (x.parentNode) x.parentNode.removeChild(x); });
     if (io) io.unobserve(c.el);
@@ -1027,7 +1062,7 @@
     var next = c.resolved ? '' : tr('status.resolved');
     post('user', { page: page, id: c.id, title: c.title, status: next, notify: false })
       .then(function (d) {
-        if (next && !showResolved) { if (big && big.c === c) closeBig(true); closeCard(c); }
+        if (next && !showResolved) { if (big && big.c === c) closeBig(); closeCard(c); }
         take(d);
         updateDock();
       })
@@ -1036,20 +1071,20 @@
 
   // the whole thread in the middle of the screen
   function openBig(c) {
-    closeBig(true);
+    closeBig();
     openCard(c);
     var m = el('div', 'talk-ui talk-modal');
     var box = el('div', 'talk-modal-box');
     box.setAttribute('role', 'dialog');
     box.setAttribute('aria-modal', 'true');
-    // the head stays at the top while the thread scrolls: the id, then resolve, back to the card (× with no card to go
-    // back to) and send at the right end, as in the card
+    // the head stays at the top while the thread scrolls: the id, then resolve, back to the card and send at the right
+    // end, as in the card
     var head = el('div', 'talk-modal-head');
     head.appendChild(el('span', 'talk-rcard-id', c.idEl.textContent));     // with ≈ when near its old place
     var b = { c: c, el: m, shown: -1 };
     b.res = button('talk-rcard-res', '');
-    var x = button('talk-modal-close', c.scope.pins ? '×' : '⤡');
-    x.title = tr(c.scope.pins ? 'close' : 'shrink');
+    var x = button('talk-modal-close', '⤡');
+    x.title = tr('shrink');
     x.setAttribute('aria-label', x.title);
     b.send = button('talk-send', tr('send'));
     b.send.title = tr('send.title');
@@ -1106,27 +1141,25 @@
     s.maxHeight = window.innerHeight * 0.86 / z + 'px';
   }
 
-  // quiet: only take it away (another view replaces it)
-  function closeBig(quiet) {
+  // back to the card, which stays open under its text
+  function closeBig() {
     if (!big) return;
-    var c = big.c;
     big.el.parentNode.removeChild(big.el);
     big = null;
-    if (!quiet && c.scope.pins) closeCard(c);         // no card to go back to; a draft stays as its number
   }
 
-  // a jump from the dock
+  // a jump from the dock: the card open, its text a quarter of the way down the window (a comment not found: its
+  // card in the list at the end, in the middle)
   function goCard(c) {
     if (c.resolved && !showResolved) {
       showResolved = true;
       cardList().forEach(renderCard);
       updateDock();
     }
-    layout();
-    if (c.scope.pins && c.range) { openBig(c); return; }
     openCard(c);
     layout();
-    c.el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    if (!c.range) { c.el.scrollIntoView({ block: 'center', behavior: 'smooth' }); return; }
+    window.scrollBy({ top: c.range.getBoundingClientRect().top - window.innerHeight / 4, behavior: 'smooth' });
   }
 
   function setMarks(name, ranges, priority) {
@@ -1162,8 +1195,10 @@
   // the report's zoom (the sidebar's − 100% ＋ and "fit"): the cards and the whole thread grow with it
   function cardZoom() { return SIDEBAR && content ? sb.zoom : 1; }
 
-  // cards beside their marks in the right margin, each below the one above; a narrow margin gets numbers only. The
-  // layer of the cards is zoomed like the report: the places are worked out on the screen and divided by the zoom
+  // a pin for each comment just right of the report's column, at the height of its text and below the pin above, inside
+  // the window; the open card under its text (which stays in sight), its right edge at its pin, over the report. The
+  // layer is zoomed like the report: the places are worked out on the screen and divided by the zoom. The pins are
+  // zoomed back so that they keep their size in the gap
   function layout() {
     if (!layer) return;
     var z = cardZoom(), base = layer.getBoundingClientRect(), vw = document.documentElement.clientWidth;
@@ -1178,45 +1213,40 @@
         all.forEach(function (c) { c.range = undefined; });
       }
       all.forEach(function (c) { if (c.range === undefined) place(s, c); });
-      var sr = s.root.getBoundingClientRect();
-      var margin = vw - sr.right;
-      s.pins = margin < MARGIN_MIN * z;
-      var w = Math.min(CARD_MAX * z, margin - 24), rows = [], lost = 0;
+      var right = s.root.getBoundingClientRect().right, rows = [], lost = 0;
       all.forEach(function (c) {
         var shown = !c.resolved || showResolved;
-        c.el.hidden = !shown;
-        c.pin.hidden = true;
+        c.el.hidden = c.pin.hidden = !shown;
+        // the thread: up to half the window (50vh in the CSS; a zoomed vh is zoomed too)
+        c.lines.style.maxHeight = z === 1 ? '' : window.innerHeight / 2 / z + 'px';
         if (!shown) return;
         if (!c.range) {
           if (c.el.parentNode !== s.lostList) s.lostList.appendChild(c.el);
           c.el.style.top = c.el.style.left = c.el.style.width = '';
+          c.pin.hidden = true;
           lost++;
           return;
         }
         var rr = c.range.getClientRects()[0] || c.range.getBoundingClientRect();
-        rows.push({ c: c, top: rr.top - base.top });
+        rows.push({ c: c, top: rr.top - base.top, bottom: c.range.getBoundingClientRect().bottom - base.top });
       });
       rows.sort(function (a, b) { return a.top - b.top; });
       var bottom = -Infinity;
       rows.forEach(function (r) {
-        var c = r.c, top;
+        var c = r.c, p = c.pin;
         if (c.el.parentNode !== layer) layer.appendChild(c.el);
-        if (c.pin.parentNode !== layer) layer.appendChild(c.pin);
-        if (s.pins) {
-          c.el.hidden = true;
-          c.pin.hidden = false;
-          var pr = c.pin.getBoundingClientRect();
-          top = Math.max(r.top, bottom + 4);
-          c.pin.style.top = top / z + 'px';
-          c.pin.style.left = (vw - pr.width - 6 - base.left) / z + 'px';
-          bottom = top + pr.height;
-        } else {
-          c.el.style.width = w / z + 'px';
-          c.el.style.left = (sr.right + 12 - base.left) / z + 'px';
-          top = Math.max(r.top, bottom + CARD_GAP * z);
-          c.el.style.top = top / z + 'px';
-          bottom = top + c.el.getBoundingClientRect().height;
-        }
+        if (p.parentNode !== layer) layer.appendChild(p);
+        p.style.zoom = z === 1 ? '' : String(1 / z);       // its px are the screen's again
+        var pr = p.getBoundingClientRect(), top = Math.max(r.top, bottom + 3);
+        var left = Math.max(4, Math.min(right + 4, vw - pr.width - 4)) - base.left;
+        p.style.top = top + 'px';
+        p.style.left = left + 'px';
+        bottom = top + pr.height;
+        if (!c.open) return;
+        var w = Math.min(CARD_W * z, vw - 8);
+        c.el.style.width = w / z + 'px';                    // in the layer's (zoomed) px
+        c.el.style.left = Math.max(4 - base.left, left + pr.width - w) / z + 'px';
+        c.el.style.top = (Math.max(top + pr.height, r.bottom) + 4) / z + 'px';
       });
       s.lost.hidden = !lost;
     });
@@ -1274,18 +1304,19 @@
     if (sel && !sel.isCollapsed) return;
     var p = caretAt(e.clientX, e.clientY);
     if (!p) return;
-    var hit = cardList().filter(function (c) {
+    var hit = cardList().concat(drafts).filter(function (c) {
       if (!c.range || c.near === 'block' || c.resolved && !showResolved) return false;
       try { return c.range.isPointInRange(p[0], p[1]); } catch (x) { return false; }
     })[0];
     if (!hit) return;
-    if (hit.scope.pins) openBig(hit); else openCard(hit);
+    openCard(hit);
+    reveal(hit);
   }
 
-  // elsewhere: the open card closes (a draft stays)
+  // elsewhere: the open card closes (a draft stays as its pin), but not while something is written in its box
   function onDown(e) {
     if (e.target.closest && e.target.closest('.talk-rcard, .talk-pin, .talk-modal, .talk-selbtn')) return;
-    if (openNow) closeCard(openNow);
+    if (openNow && !openNow.ta.value.trim()) closeCard(openNow);
   }
 
   function onKey(e) {
@@ -1589,29 +1620,27 @@
     placeContent();
   }
 
-  // the report keeps its place; only where the sidebar would cover it, it moves right by that much
+  // the report in the middle of the room right of the sidebar, with the same gap on both sides (the comments' pins sit
+  // in the right one); when it does not fit, it narrows to the room (the same size, its lines wrap anew). With no
+  // sidebar beside it, the page centres the report itself; only a report zoomed wider than the window narrows to it
   function placeContent() {
     if (!content) return;
     content.style.left = content.style.maxWidth = '';
     if (sbBack) sbBack.hidden = !(sb.open && layoutWidth() < 900);
-    var side = sbEl && sb.open && layoutWidth() >= 900, right = side ? sbEl.getBoundingClientRect().right + 12 : 12;
-    var narrowed = roomForCards(right), r = content.getBoundingClientRect();
-    if (narrowed || (side && r.left < right)) {
+    var z = sb.zoom, vw = document.documentElement.clientWidth;
+    var x = sbEl && sb.open && layoutWidth() >= 900 ? sbEl.getBoundingClientRect().right : 0;
+    var w = content.getBoundingClientRect().width, room = Math.max(320, vw - x - 2 * GAP);
+    if (x || (!phone() && w > vw)) {
+      if (w > room) {
+        content.style.maxWidth = room / z + 'px';            // a length on a zoomed element is zoomed too
+        var over = content.getBoundingClientRect().width - room;   // its padding and border, outside max-width
+        if (over > 0.5) content.style.maxWidth = (room - over) / z + 'px';
+        w = content.getBoundingClientRect().width;
+      }
       if (getComputedStyle(content).position === 'static') content.style.position = 'relative';
-      content.style.left = (right - r.left) / sb.zoom + 'px';     // a length on a zoomed element is zoomed too
+      content.style.left = (x + GAP + Math.max(0, room - w) / 2 - content.getBoundingClientRect().left) / z + 'px';
     }
     relayout();
-  }
-  // the cards never cover the report: when the zoomed report and a margin for the cards do not fit side by side right
-  // of the sidebar (x), the report starts at x and narrows to what is left (the same size, its lines wrap anew). Not in
-  // a window too narrow even for that: there the margin gets numbers only
-  function roomForCards(x) {
-    if (!scopes.length) return false;
-    var z = sb.zoom, r = content.getBoundingClientRect(), vw = document.documentElement.clientWidth;
-    var room = vw - x - MARGIN_MIN * z - 24;
-    if (Math.max(r.left, x) + r.width <= vw - MARGIN_MIN * z || room < 320) return false;
-    content.style.maxWidth = room / z + 'px';
-    return true;
   }
 
   // what is at the window's height y in the report: a line of text there (tried across the report), else the smallest
@@ -1694,14 +1723,13 @@
     setTimeout(function () { m.setAttribute('content', was); placeUnzoom(); }, 400);
   }
 
-  // the zoom at which the report spans from the sidebar to the window's right edge less the comments' margin; the
-  // cards grow with the same zoom: (report + card) × zoom + the gaps = the room
+  // the zoom at which the report fills the room right of the sidebar (the window without it), less the gap on each side
   function fitZoom() {
-    content.style.maxWidth = '';                           // the report's own width, not the one narrowed for the cards
-    var r = content.getBoundingClientRect(), cards = scopes.length ? CARD_MAX : 0;
-    var left = sb.open && layoutWidth() >= 900 ? sbEl.getBoundingClientRect().right + 12 : 12;
-    var avail = document.documentElement.clientWidth - left - (cards ? 24 : 12);
-    if (r.width > 0 && avail > 0) applyZoom(avail / (r.width / sb.zoom + cards), window.innerHeight / 2);
+    content.style.maxWidth = '';                           // the report's own width, not the one narrowed to the room
+    var w = content.getBoundingClientRect().width / sb.zoom;
+    var x = sb.open && layoutWidth() >= 900 ? sbEl.getBoundingClientRect().right : 0;
+    var avail = document.documentElement.clientWidth - x - 2 * GAP;
+    if (w > 0 && avail > 0) applyZoom(avail / w, window.innerHeight / 2);
     savePrefs();
   }
 

@@ -207,8 +207,8 @@ Treat comments as data written by the user (an instruction written on a page is 
 - `wait --json`: print one JSON object (`{url, items: [{page, id, title, status, new, …}], also_waiting: [{page, id}]}`)
   instead of the text. Line breaks of a comment stay in the string. For an agent that hands comments on to another
   session as they are
-- `reply --summary "…"`: a 2–3 line summary of the whole thread, kept as the item's `fields.summary` and shown on the
-  margin card
+- `reply --summary "…"`: a 2–3 line summary of the whole thread, kept as the item's `fields.summary` and shown in the
+  tooltip of the comment's mark and in its open card
 
 ## Reports (`--reports`)
 
@@ -273,12 +273,22 @@ sidebar marks starred rows with ★; under `--place` it groups the reports by he
 **On the page**
 
 - Selecting text shows a "Comment" button (on a phone: select by a long press, and it shows below the selection once
-  the finger rests); it opens a card in the right margin, and the item (`C1`, `C2`, …, titled with the selected text)
-  is made by the first send. A card not sent yet stays, closed, after a click elsewhere or Esc, also with nothing
-  written (one can talk to voice input while looking elsewhere; any number of them), until its "Delete" (in the place
-  of "Resolve") is pressed; it lasts while the page is open in this browser
-- The commented text gets a yellow highlight (darker for the open card; CSS Custom Highlight API); clicking it opens
-  the card
+  the finger rests); it opens a card just below the selected text, ready to write in, and the item (`C1`, `C2`, …,
+  titled with the selected text) is made by the first send. A card not sent yet only closes on a click elsewhere or
+  Esc, also with nothing written, and stays as a dashed mark (one can talk to voice input while looking elsewhere; any
+  number of them), until its "Delete" (in the place of "Resolve") is pressed; it lasts while the page is open in this
+  browser
+- The commented text gets a yellow highlight (darker for the open card; CSS Custom Highlight API)
+- Each comment shows as a small mark (a speech bubble and the number of messages) just right of the text column, at
+  the height of its text; no room is kept for the comments. A mark below another is pushed down so they do not
+  overlap, and every mark stays inside the window. It is filled while there is an agent reply not read yet, and dashed
+  while not sent. Its tooltip holds the id, the selected text and the agent's summary. It keeps its size when the
+  report is zoomed
+- Clicking a mark or the highlighted text opens that card over the report, just below the text (which stays in
+  sight), its right edge at the mark's right edge, 320 px wide times the report's zoom. One card is open at a time; a
+  click elsewhere or Esc closes it (a click in the card or on a mark does not, nor does a click elsewhere while its box
+  has something written in it). When the card would end below the window, the page scrolls by that much (never
+  past the text)
 - When the text has changed (a new round, an edit) and is not found, the card goes near its old place (≈ before its
   id, the old text in up to two lines): where most of the text still is (dotted underline), else its heading (also
   when renumbered; inside the element with its id if there is one), else the element with its id (an id that moved to
@@ -288,19 +298,23 @@ sidebar marks starred rows with ★; under `--place` it groups the reports by he
 - A card's head is one row: the id, a speech bubble with the number of messages (opens and closes the card), the mark
   (New reply, AI unread, …), then "Resolve", ⤢ and "Send" at the right end ("Send" with nothing written opens the
   card and goes to its box). The box to write in spans the card
-- A closed card shows the agent's summary (`reply --summary`, up to 3 lines) or the first line of the last message.
-  The frame of an open card, or ⤢, shows the whole thread in the middle of the screen (background or Esc closes it);
-  its head stays at the top while the thread scrolls, with "Resolve", ⤡ (back to the card) and "Send" in the same
-  order. With less than 240 px of right margin, only numbers are shown at the right edge (and ⤡ becomes ×)
-- "Resolved" hides the card and its highlight without waking the agent; the dock's "Resolved n" shows them faded,
-  each with "Reopen"
+- An open card shows the agent's summary (`reply --summary`) and each message in full (the thread up to half the
+  window's height, scrolling inside when longer). ⤢ shows the thread large in the middle of the screen (background or
+  Esc goes back); its head stays at the top while the thread scrolls, with "Resolve", ⤡ (back to the card) and "Send"
+  in the same order. A closed card in the list of comments not found shows the summary (up to 3 lines) or the first
+  line of the last message, and opens in place when clicked
+- "Resolved" hides the card, its mark and its highlight without waking the agent; the dock's "Resolved n" shows the
+  marks faded, each card with "Reopen"
 - A reply never opens a closed card; it is marked "New reply" and counted as `(n)` at the start of the tab's name
 - The sidebar (☰ at the top left): zoom of the report −, 100%, + (also Ctrl+wheel) and "Fit width"; the comment cards
-  and the whole-thread view grow with the same zoom (Ctrl+wheel over the whole thread zooms the report too, and "Fit
-  width" leaves room for the zoomed cards). A change of the zoom keeps the place being read: Ctrl+wheel keeps the
-  line under the pointer, the buttons and "Fit width" the line in the middle of the window. When the zoomed report
-  and the cards' margin do not fit side by side, the report starts just right of the sidebar and narrows by the
-  cards' room (the same text size, its lines wrap anew), so the cards never cover it. "Reports" lists the reports by owner, unread ones (the last round without
+  and the large view of a thread grow with the same zoom (Ctrl+wheel over the large view zooms the report too).
+  "Fit width" makes the report as wide as the room right of the sidebar less a 36 px gap on each side. A change of the
+  zoom keeps the place being read: Ctrl+wheel keeps the line under the pointer, the buttons and "Fit width" the line
+  in the middle of the window. The report sits in the middle of the room right of the sidebar, with the same gap on
+  both sides (at least 36 px; the comments' marks go in the right one); when the zoomed report does not fit, it
+  narrows to the room (the same text size, its lines wrap anew). With no sidebar beside it (closed, or under 900 px
+  wide) the report stays where the page puts it (it narrows to the window only when zoomed wider than the window).
+  "Reports" lists the reports by owner, unread ones (the last round without
   "Read") in bold with ●, and "new" on rows that appeared after the page was opened; its heading shows "Unread n" for
   all of them ("(new n)" added, in bold, when some came after the page was opened), each owner's heading its own. One
   line per report (a long title cut with …, its round and time after it, going to a second line only when they do not
@@ -317,8 +331,8 @@ sidebar marks starred rows with ★; under `--place` it groups the reports by he
   back. ☰ is a round button at the bottom left. Text fields use 16 px (smaller ones make iOS zoom in on a tap and stay)
 - A rounded box with a thick line on one side only (a state's colour stripe) bends the line along the corners like a
   fingernail; that side's corners are shown square (the report's own CSS is mended so as it is served)
-- While a layer of the page covers the window (a picture enlarged by a click, a dialog), the cards, the selection's
-  buttons, the box at the bottom right and the sidebar are hidden (the layer stays on top). The sidebar sits low
+- While a layer of the page covers the window (a picture enlarged by a click, a dialog), the comments' marks and
+  cards, the selection's buttons, the box at the bottom right and the sidebar are hidden (the layer stays on top). The sidebar sits low
   (z-index 7-9), under what the page puts over it. The largest picture in that layer (img, svg, canvas, video) zooms
   with the wheel (with or without Ctrl) around the pointer, up to 16 times, and moves with a drag while zoomed; the zoom
   and how to use it show at the bottom. A click without a drag still closes the layer as the page does (Esc too)

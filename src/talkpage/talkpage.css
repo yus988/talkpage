@@ -98,7 +98,8 @@ body { padding-bottom: 64px; }
 .talk-card-body { margin-top: 2px; }
 .talk-error { color: var(--talk-ng); }
 
-/* reports: comments on selected text. Marks by the CSS Custom Highlight API; cards in the right margin */
+/* reports: comments on selected text. Marks by the CSS Custom Highlight API; a pin right of the report's column for
+   each comment, and its card under the text while it is open */
 ::highlight(talk-mark) { background-color: rgba(255, 214, 0, .35); }
 ::highlight(talk-mark-done) { background-color: rgba(128, 128, 128, .2); }
 ::highlight(talk-mark-open) { background-color: rgba(255, 190, 0, .75); }
@@ -116,6 +117,7 @@ body { padding-bottom: 64px; }
   background: var(--talk-bg); border: 1px solid var(--talk-line); border-radius: 8px; box-shadow: 0 1px 4px rgba(0, 0, 0, .1); cursor: pointer;
 }
 .talk-rcard.talk-open { z-index: 2; border-color: var(--talk-accent); box-shadow: 0 3px 14px rgba(0, 0, 0, .18); cursor: default; }
+.talk-layer > .talk-rcard:not(.talk-open) { display: none; }   /* over the report, only the open card shows */
 .talk-rcard.talk-done { opacity: .55; }
 /* the head: one row (id, 💬 n, mark, resolve ⤢ send), nothing wraps; the mark gives way */
 .talk-rcard-head { display: flex; align-items: center; gap: 4px; min-width: 0; }
@@ -130,16 +132,23 @@ body { padding-bottom: 64px; }
 .talk-rcard-sum:empty { display: none; }
 .talk-rcard-body { display: none; }
 .talk-rcard.talk-open .talk-rcard-body { display: block; }
+/* an open card: the agent's summary in full (not the last message's first line, which is in the thread), then each
+   message whole, the thread scrolled inside when long */
 .talk-rcard.talk-open .talk-rcard-sum { display: none; }
-.talk-rcard-lines { max-height: 240px; overflow-y: auto; margin-top: 4px; }
+.talk-rcard.talk-open .talk-rcard-sum.talk-rcard-summary {
+  display: block; margin: 4px 0 0; padding: 2px 8px; white-space: pre-wrap;
+  border: 1px dashed var(--talk-line); border-radius: 6px;
+}
+.talk-rcard-lines { max-height: 50vh; overflow-y: auto; margin-top: 4px; }
 .talk-rcard-line { margin: 3px 0; padding: 2px 8px 3px; border-radius: 6px; background: var(--talk-user-bg); }
 .talk-rcard-line.talk-agent { background: var(--talk-agent-bg); }
-.talk-rcard-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.talk-rcard button, .talk-modal button, .talk-pin {
+.talk-rcard-text { display: block; white-space: pre-wrap; overflow-wrap: anywhere; }
+.talk-rcard-text code { font-size: 12px; }
+.talk-rcard button, .talk-modal button {
   font: inherit; font-size: 12px; color: var(--talk-fg); background: var(--talk-bg);
   border: 1px solid var(--talk-line); border-radius: 14px; padding: 0 10px; cursor: pointer;
 }
-.talk-rcard button:hover, .talk-modal button:hover, .talk-pin:hover { border-color: var(--talk-muted); }
+.talk-rcard button:hover, .talk-modal button:hover { border-color: var(--talk-muted); }
 .talk-rcard-head button { flex: none; height: 22px; padding: 0 7px; line-height: 20px; }
 .talk-rcard-head .talk-rcard-exp { width: 22px; padding: 0; }
 .talk-rcard-bub { display: inline-flex; align-items: center; gap: 3px; }
@@ -148,8 +157,21 @@ body { padding-bottom: 64px; }
 .talk-rcard-bub[aria-expanded="true"] { color: var(--talk-accent); border-color: var(--talk-accent) !important; }
 .talk-rcard-head .talk-send, .talk-modal-head .talk-send { color: var(--talk-accent); border-color: var(--talk-accent); }
 .talk-rcard .talk-form, .talk-modal .talk-form { margin-top: 4px; }
-.talk-pin { position: absolute; padding: 0 6px; font: 11px/1.6 system-ui, sans-serif; font-weight: 700; color: var(--talk-accent); }
-.talk-pin.talk-pin-new { color: #fff; background: var(--talk-accent); border-color: var(--talk-accent); }
+/* a comment's pin: a speech bubble and the number of messages, small enough for the gap right of the report (it keeps
+   its size when the report is zoomed); filled while the agent's reply is unread, dashed while not sent yet */
+.talk-pin {
+  position: absolute; display: inline-flex; align-items: center; justify-content: center; gap: 1px;
+  box-sizing: border-box; height: 20px; min-width: 22px; margin: 0; padding: 0 3px;
+  font: 11px/18px system-ui, sans-serif; color: var(--talk-accent); background: var(--talk-bg);
+  border: 1px solid var(--talk-line); border-radius: 4px; box-shadow: 0 1px 3px rgba(0, 0, 0, .15); cursor: pointer;
+}
+.talk-pin svg {
+  flex: none; width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round;
+}
+.talk-pin:hover, .talk-pin[aria-expanded="true"] { border-color: var(--talk-accent); }
+.talk-pin[data-m="new"] { color: #fff; background: var(--talk-accent); border-color: var(--talk-accent); }
+.talk-pin[data-m="draft"] { border-style: dashed; border-color: var(--talk-accent); }
+.talk-pin.talk-done { opacity: .55; }
 
 /* comments whose text is not in the report any more */
 .talk-lost { margin: 24px 0 8px; padding-top: 8px; border-top: 1px solid var(--talk-line); }
