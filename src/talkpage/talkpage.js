@@ -1703,6 +1703,10 @@
     z = Math.max(0.5, Math.min(3, Math.round(z * 100) / 100));
     sb.zoom = z;
     content.style.zoom = z === 1 ? '' : String(z);
+    // an item outside the content (one a page carries after its <main>) grows with it too
+    [].forEach.call(document.querySelectorAll('[data-talk]'), function (e) {
+      if (!content.contains(e) && !(layer && layer.contains(e)) && !e.closest('.talk-ui')) e.style.zoom = content.style.zoom;
+    });
     zoomLabel.textContent = Math.round(z * 100) + '%';
     placeContent();
     dirtyAll();
