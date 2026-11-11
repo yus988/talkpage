@@ -57,6 +57,19 @@ talkpage serve --place [<heading>:]<id>=<folder> ... [--fallback <id>] [--marks 
 - `--tailscale`: open the pages from a phone or another PC through a [Tailscale](https://tailscale.com/kb/1312/serve)
   tailnet (a private network of your own devices) (see "From outside" below)
 
+### Run it like an app (`talkpage_tray.pyw`, Windows)
+
+```
+pythonw talkpage_tray.pyw <root> [--port 8190] [--name <name>.localhost] [--icon <file>.ico] [--log <file>] [--no-open] [other serve options]
+pythonw talkpage_tray.pyw <root> ... --install "<shortcut name>"
+```
+
+- Starts `talkpage.py serve` in the background with no console window and opens the entrance page in the default browser. If the port already answers, it only opens the page
+- An icon appears in the notification area: left click opens the page, right click > Stop stops the server and quits. If the server exits, the icon goes away
+- `--install <name>`: writes a Desktop shortcut (start and open the page) and a Startup shortcut (`--no-open`: starts at logon without opening the browser) with the same options. One line sets up another PC the same way
+- `--log`: where the server output goes (discarded by default). `--icon`: the tray and shortcut icon (default: a speech bubble)
+- Needs `pip install pystray pillow` (into that Python, not `--user`, since it runs with `-I`)
+
 ## From outside (`--tailscale`)
 
 Leave the PC on and read the same pages, and comment on them, from a phone or a PC elsewhere. Nothing goes on the
