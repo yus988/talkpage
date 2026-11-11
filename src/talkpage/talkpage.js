@@ -1446,7 +1446,7 @@
       }
     }
   }
-  var reportsOff = false, reportsFirst = null, reportsTimer = 0;
+  var reportsOff = false, reportsFirst = null, reportsTimer = 0, reportsShown = false;
 
   function loadPrefs() {
     try {
@@ -1920,6 +1920,9 @@
     });
     rp.sec.hidden = false;
     rp.body.scrollTop = keep;
+    // the page being read: in view in the list once, when the list first comes
+    var me = rp.body.querySelector('[aria-current="page"]');
+    if (me && !reportsShown) { reportsShown = true; me.scrollIntoView({ block: 'center' }); }
   }
 
   // every 30 s and when the tab comes to the front; 404 (a server without --reports): the headings alone

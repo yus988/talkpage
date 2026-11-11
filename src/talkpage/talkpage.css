@@ -268,11 +268,17 @@ body { padding-bottom: 64px; }
 .talk-sb-meta { flex: none; font-size: 13px; color: var(--talk-muted); white-space: nowrap; }
 .talk-sb-row.talk-unread .talk-sb-t { font-weight: 700; }
 .talk-sb-row.talk-unread .talk-sb-t::before { content: "\25CF  "; color: var(--talk-accent); }
-.talk-sb-row.talk-here, .talk-toc.talk-here { background: var(--talk-agent-bg); color: var(--talk-accent); }
+.talk-toc.talk-here { background: var(--talk-agent-bg); color: var(--talk-accent); }
+/* the report being read: filled with the accent, so it is found at a glance */
+.talk-sb-row.talk-here, .talk-sb-row.talk-here:hover { color: var(--talk-bg); background: var(--talk-accent); }
+.talk-sb-row.talk-here .talk-sb-meta, .talk-sb-row.talk-here .talk-sb-note,
+.talk-sb-row.talk-here .talk-sb-t::before { color: inherit; opacity: .85; }
 .talk-sb-new { flex: none; padding: 0 5px; font-size: 11px; font-weight: 700; color: #fff; background: var(--talk-ng); border-radius: 8px; }
 /* a submission: [▸] Submission title — the button shows the reports it is based on, the title opens the page */
 .talk-sb-subhead { display: flex; align-items: center; gap: 4px; padding-left: 2px; border-radius: 4px; }
-.talk-sb-subhead.talk-here { background: var(--talk-agent-bg); }
+.talk-sb-subhead.talk-here { color: var(--talk-bg); background: var(--talk-accent); }
+.talk-sb-subhead.talk-here .talk-sb-open, .talk-sb-subhead.talk-here .talk-sb-tag,
+.talk-sb-subhead.talk-here .talk-sb-gunread { color: var(--talk-bg); border-color: var(--talk-bg); }
 .talk-sb-subhead .talk-sb-row { flex: 1; min-width: 0; padding-left: 2px; }
 .talk-sb-subhead .talk-sb-gunread { flex: none; white-space: nowrap; padding-right: 4px; }
 .talk-sb-open {
