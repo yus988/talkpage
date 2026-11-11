@@ -101,7 +101,7 @@ body { padding-bottom: 64px; }
 /* reports: comments on selected text. Marks by the CSS Custom Highlight API; a pin right of the report's column for
    each comment, and its card under the text while it is open */
 ::highlight(talk-mark) { background-color: rgba(255, 214, 0, .35); }
-::highlight(talk-mark-done) { background-color: rgba(128, 128, 128, .2); }
+::highlight(talk-mark-done) { background-color: rgba(255, 214, 0, .12); }
 ::highlight(talk-mark-open) { background-color: rgba(255, 190, 0, .75); }
 /* the text has changed and most of it is still there: a dotted line instead of the yellow */
 ::highlight(talk-mark-near) { text-decoration: underline dotted rgba(200, 140, 0, .9); text-decoration-thickness: 2px; }

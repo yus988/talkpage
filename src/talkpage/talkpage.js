@@ -70,8 +70,9 @@
       'lost': 'Comments not found in the text',
       'moved': 'The text has changed: shown near its old place (it was “{q}”)',
       'pin.title': '{id} “{q}”',
-      'dock.resolved': 'Resolved {n}',
-      'dock.resolved.title': 'Show or hide the resolved comments',
+      'dock.resolved': 'Hide resolved {n}',
+      'dock.resolved.show': 'Show resolved {n}',
+      'dock.resolved.title': 'Show or hide the resolved comments (kept faint where they were asked)',
       'sb.toggle': 'Show or hide the sidebar',
       'sb.zoomout': 'Smaller text',
       'sb.zoomin': 'Larger text',
@@ -154,8 +155,9 @@
       'lost': '本文で見つからないコメント',
       'moved': '本文が変わったため、近い場所に表示（元の文：「{q}」）',
       'pin.title': '{id}「{q}」',
-      'dock.resolved': '解決済み {n}',
-      'dock.resolved.title': '解決済みのコメントの表示の切り替え',
+      'dock.resolved': '解決済みを隠す {n}',
+      'dock.resolved.show': '解決済みを表示 {n}',
+      'dock.resolved.title': '解決済みのコメント（聞いた所に薄く残る）の表示の切り替え',
       'sb.toggle': 'サイドバーの表示の切り替え',
       'sb.zoomout': '本文の縮小',
       'sb.zoomin': '本文の拡大',
@@ -441,8 +443,8 @@
     dock.waiting.hidden = !n.waiting;
     dock.waiting.textContent = tr('dock.waiting', { n: n.waiting });
     dock.resolved.hidden = !n.resolved;
-    dock.resolved.textContent = tr('dock.resolved', { n: n.resolved });
-    dock.resolved.setAttribute('aria-pressed', String(showResolved));
+    dock.resolved.textContent = tr(showResolved ? 'dock.resolved' : 'dock.resolved.show', { n: n.resolved });
+    dock.resolved.setAttribute('aria-pressed', String(!showResolved));
     dock.progress.textContent = n.all ? tr('dock.progress', { done: n.done, all: n.all }) : '';
     var p = PRESENCE[presence] || PRESENCE.absent;
     dock.presence.textContent = p[0];
@@ -602,7 +604,7 @@
   var scopes = [];          // {root, prefix, re, lost, lostList, ix, dirty}: where selecting text makes a comment
   var cards = {};           // id -> comment card of an item <prefix><number> the server keeps
   var drafts = [];          // the cards of comments not sent yet (not on the server)
-  var openNow = null, big = null, showResolved = false;
+  var openNow = null, big = null, showResolved = true;
   var layer = null, selLayer = null, selBtn = null, selEdit = null, content = null, layoutQueued = false;
   var touched = false, selTimer = 0;            // the last pointer was a finger; the wait for a touch selection
   var marks = !!(window.CSS && CSS.highlights && typeof Highlight === 'function');
@@ -1057,7 +1059,8 @@
       });
   }
 
-  // resolved: hidden with its mark, and the agent is not woken; "restore" clears the status
+  // resolved: the agent is not woken; the text keeps a faint mark and the pin and card stay, faded, so one still sees
+  // where it was asked (the dock's "Hide resolved n" hides them); "restore" clears the status
   function resolveCard(c) {
     var next = c.resolved ? '' : tr('status.resolved');
     post('user', { page: page, id: c.id, title: c.title, status: next, notify: false })

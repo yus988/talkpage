@@ -316,8 +316,9 @@ sidebar marks starred rows with ★; under `--place` it groups the reports by he
   Esc goes back); its head stays at the top while the thread scrolls, with "Resolve", ⤡ (back to the card) and "Send"
   in the same order. A closed card in the list of comments not found shows the summary (up to 3 lines) or the first
   line of the last message, and opens in place when clicked
-- "Resolved" hides the card, its mark and its highlight without waking the agent; the dock's "Resolved n" shows the
-  marks faded, each card with "Reopen"
+- "Resolve" does not wake the agent and does not remove the comment: its text keeps a faint highlight and its pin
+  stays, faded, and opens the card as before (so one sees it was asked there). The dock's "Hide resolved n" hides
+  them; "Reopen" clears the status
 - A reply never opens a closed card; it is marked "New reply" and counted as `(n)` at the start of the tab's name
 - The sidebar (☰ at the top left): zoom of the report −, 100%, + (also Ctrl+wheel) and "Fit width"; the comment cards
   and the large view of a thread grow with the same zoom (Ctrl+wheel over the large view zooms the report too).
