@@ -334,3 +334,6 @@ body { padding-bottom: 64px; }
   .talk-sb-head, .talk-sb-ghead { padding-top: 8px; padding-bottom: 8px; }
   .talk-sb-row, .talk-toc { padding-top: 7px; padding-bottom: 8px; }
 }
+/* a session started from another: a smaller, indented sub-group in the group of the top-most one */
+.talk-sb-ghead.talk-sb-shead { position: static; margin: 4px 0 0 10px; width: calc(100% - 10px); padding: 3px 4px 1px; border-top: 1px solid var(--talk-line); font-size: 12px; font-weight: 600; }
+.talk-sb-subrows { margin-left: 10px; }

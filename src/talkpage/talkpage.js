@@ -1828,7 +1828,8 @@
   // the reports by place (a server of several folders) or by owner; unread ones bold, ones added since this page opened
   // marked new, this page marked; the ones hidden in the list left out (but this page). A submission comes first in
   // its group as a folder: the reports it is based on of the same owner (and group) move into it; another owner's stay
-  // in their own group alone (a report is listed under the one who wrote it)
+  // in their own group alone (a report is listed under the one who wrote it). By owner, a session started from another
+  // (row.parent: the name of the top-most one) is listed in that one's group, as a sub-group of its own after its rows
   function renderReports(rows) {
     rows = rows.filter(function (r) { return !r.hidden || r.page === page; });
     if (!reportsFirst) {
@@ -1841,7 +1842,7 @@
     rp.total.classList.toggle('talk-sb-fresh', !!fresh.length);
     var groups = [], by = {}, keep = rp.body.scrollTop, byTheme = {}, moved = {};
     var byPlace = rows.some(function (r) { return r.group; });
-    function gkey(r) { return (byPlace ? r.group : r.owner) || ''; }
+    function gkey(r) { return (byPlace ? r.group : r.parent || r.owner) || ''; }
     rows.forEach(function (r) { if (r.tracked) byTheme[r.theme] = r; });
     function kidsOf(s) { return (s.basis || []).map(function (t) { return byTheme[t]; }).filter(Boolean); }
     rows.forEach(function (s) {
@@ -1860,13 +1861,36 @@
       all.href = '/';
       rp.body.appendChild(all);
     }
-    groups.forEach(function (name) {
-      var rs = by[name], unread = {}, key = (byPlace ? 'place:' : 'owner:') + name;
-      rs.forEach(function (r) {                             // the group's own rows and its submissions' moved ones
+    // how many of rs are unread; a submission counts the reports moved into its folder, and only those of this group
+    function unreadOf(rs, name) {
+      var u = {};
+      rs.forEach(function (r) {
         (r.submission ? kidsOf(r).filter(function (k) { return moved[k.page]; }) : [r])
-          .forEach(function (k) { if (isUnread(k) && gkey(k) === name) unread[k.page] = true; });
+          .forEach(function (k) { if (isUnread(k) && gkey(k) === name) u[k.page] = true; });
       });
-      var n = Object.keys(unread).length;
+      return Object.keys(u).length;
+    }
+    // the rows of a group or sub-group: its submissions first, each as a folder
+    function fillRows(list, rs) {
+      rs.filter(function (r) { return r.submission; }).concat(rs.filter(function (r) { return !r.submission; }))
+        .forEach(function (r) {
+          if (!r.submission) { list.appendChild(reportRow(r)); return; }
+          var kids = kidsOf(r), own = kids.filter(function (k) { return k.owner === r.owner && gkey(k) === gkey(r); });
+          list.appendChild(subFolder(r, own, kids.length - own.length));
+        });
+    }
+    groups.forEach(function (name) {
+      var rs = by[name], key = (byPlace ? 'place:' : 'owner:') + name, top = rs, subs = {}, subNames = [];
+      if (!byPlace) {                          // sessions started from the group's: a sub-group each, by name
+        top = rs.filter(function (r) { return !r.parent || r.owner === name; });
+        rs.forEach(function (r) {
+          if (!r.parent || r.owner === name) return;
+          if (!subs[r.owner]) { subs[r.owner] = []; subNames.push(r.owner); }
+          subs[r.owner].push(r);
+        });
+        subNames.sort();
+      }
+      var n = unreadOf(rs, name);              // the sub-groups' too
       var g = el('div', 'talk-sb-group');
       var head = button('talk-sb-ghead', '');
       head.appendChild(el('span', 'talk-sb-gname', name || tr('sb.noowner')));
@@ -1874,12 +1898,18 @@
       var list = el('div', 'talk-sb-rows');
       head.addEventListener('click', function () { toggleFold(key, head, list); });
       paintFold(key, head, list);
-      rs.filter(function (r) { return r.submission; }).concat(rs.filter(function (r) { return !r.submission; }))
-        .forEach(function (r) {
-          if (!r.submission) { list.appendChild(reportRow(r)); return; }
-          var kids = kidsOf(r), own = kids.filter(function (k) { return k.owner === r.owner && gkey(k) === gkey(r); });
-          list.appendChild(subFolder(r, own, kids.length - own.length));
-        });
+      fillRows(list, top);
+      subNames.forEach(function (sn) {
+        var skey = key + '/' + sn, sn_n = unreadOf(subs[sn], name);
+        var sh = button('talk-sb-ghead talk-sb-shead', ''), sl = el('div', 'talk-sb-rows talk-sb-subrows');
+        sh.appendChild(el('span', 'talk-sb-gname', sn || tr('sb.noowner')));
+        if (sn_n) sh.appendChild(el('span', 'talk-sb-gunread', tr('sb.unread', { n: sn_n })));
+        sh.addEventListener('click', function () { toggleFold(skey, sh, sl); });
+        paintFold(skey, sh, sl);
+        fillRows(sl, subs[sn]);
+        list.appendChild(sh);
+        list.appendChild(sl);
+      });
       g.appendChild(head);
       g.appendChild(list);
       rp.body.appendChild(g);

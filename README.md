@@ -220,6 +220,7 @@ talkpage serve --reports --place "sdk-workspace:notes=C:/ws-a/dev-notes" --place
 |---|---|
 | `talkpage reports` / `reports list` | 未読（古い順）・既読・1 枚のページを `テーマ<TAB>回<TAB>担当<TAB>題` で出す。提出は ` [submission; basis: テーマ, …]`、答えていないコメントは ` [comments: C1,C2]`、タブで開いているものは ` [open]`。最後に、提出の meta の見つからない語を `basis not found …` の行で出す |
 | `reports owner <テーマ> <名前> <id>` | そのテーマの担当（レポートを書いたセッションの名前と id）を `<root>/owners.json` に書く（`--place` なら、テーマの頭の id のフォルダの `owners.json` に、id を除いたキーで）。同じ id のほかのテーマの名前も書き換える（セッションの名前を変えたとき）。一覧とサイドバーでは、名前は id ごとに揃える（多くのテーマに付いている名前） |
+| `reports parent <セッション id> <親の id> <親の名前>` | あるセッションを別のセッションから起動したと `<root>/session-parents.json`（`owners.json` の隣）に書く（`--place` なら最初のフォルダ。書くのは `{セッション id: {"parent": 親の id, "name": 親の名前}}`）。サイドバーでは、そのセッションのレポートは、いちばん上の祖先（親をたどる。循環は途中で止める）のグループの中に、担当ごとの小さなインデントしたサブグループとして、親自身の行の後に名前順で並ぶ。サブグループごとに折りたたみと未読数を持ち、親のグループの未読数にはサブグループも含む。提出とその根拠もサブグループの中で動く。一覧の行の `parent` は、いちばん上の祖先の名前（`owners.json` にあればその名前、なければリンクに保存した名前。親がなければ空文字）。入口の一覧（場所ごと）は変わらない |
 | `reports read <テーマ>…` / `reports read all` / `reports unread <テーマ>…` | 最後の回の「読んだ」を付ける・外す |
 | `reports open [--owner 文字]` | 未読のページを既定のブラウザで開く（タブで開いているものは除く）。`--owner` なら担当の名前にその文字を含むテーマを、既読も含めて開く |
 

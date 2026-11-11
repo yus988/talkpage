@@ -8,7 +8,7 @@
   python talkpage.py reply --page P --id ID [--status S] [--text T | --text - | --file F] [--fields JSON] [--summary S]
   python talkpage.py ack   [--page P] [--id ID ...]
   python talkpage.py show  [--page P]
-  python talkpage.py reports [list | owner THEME NAME ID | read THEME... | read all | unread THEME... | open [--owner S]]
+  python talkpage.py reports [list | owner THEME NAME ID | parent SESSION_ID PARENT_ID PARENT_NAME | read THEME... | read all | unread THEME... | open [--owner S]]
 
 serve: <root> holds the pages; the state of <dir>/<name>.html is kept beside it in <dir>/<name>.talk.json. Only
 127.0.0.1 is served. The page's Edit lets the user fix its text in place: the server writes the page's file and keeps
@@ -24,7 +24,8 @@ follows the <html lang> of each page. The page side is talkpage.js / talkpage.cs
 --name (default $TALKPAGE_NAME): also serve the pages at http://NAME/ (a second listener on 127.0.0.1:80 when it can
 be had; browsers send *.localhost to this PC). --reports: the root holds reports, <theme>/<YYYYMMDD-HHMM-rN>/index.html
 or <theme>/index.html; the server lists them (/_talk/api/reports, and / when the root has no index.html) and adds
-talkpage.js to every page it serves. reports: list them, set a theme's owner session (owners.json), mark them read.
+talkpage.js to every page it serves. reports: list them, set a theme's owner session (owners.json), say which session
+started another (parent: its reports go in a sub-group of the top-most one's group in the sidebar), mark them read.
 --tailscale: also take the requests that Tailscale serve proxies from this PC's tailnet name (set it with
 `tailscale serve --bg --https=443 http://127.0.0.1:<port>`) when they carry the login of this PC's own user; the
 address the user reads becomes https://<PC>.<tailnet>.ts.net/, which the user's phone opens too.
@@ -531,6 +532,22 @@ def owner_names(owners):
     return out
 
 
+def top_parent(sid, links, id_names):
+    """The display name of the top-most ancestor of session sid, following the parent links of session-parents.json
+    ({session: {parent, name}}; a cycle ends the walk), or '' without a parent. The name is the owner name known for
+    that id, else the name stored with the link that points at it."""
+    seen, cur, name = {sid}, sid, ''
+    while True:
+        link = links.get(cur)
+        up = link.get('parent') if isinstance(link, dict) else None
+        if not isinstance(up, str) or not up or up in seen:
+            return name
+        seen.add(up)
+        cur = up
+        n = link.get('name')
+        name = id_names.get(up) or (n if isinstance(n, str) else '')
+
+
 def bad_part(s):
     """A part of a URL path that is never served: empty, . and .., a hidden name, a backslash, and a colon (on
     Windows a drive, which would leave the folder, or a file's stream)."""
@@ -962,6 +979,19 @@ class Talk:
                 out.update((pl.key(k), v) for k, v in d.items() if isinstance(v, dict))
         return out
 
+    def parents(self):
+        """{session id: {parent, name}} of each place's session-parents.json (written by `talkpage reports parent`)."""
+        out = {}
+        for pl in self.places:
+            try:
+                with open(os.path.join(pl.root, 'session-parents.json'), encoding='utf-8') as f:
+                    d = json.load(f)
+            except (OSError, ValueError):
+                continue
+            if isinstance(d, dict):
+                out.update((k, v) for k, v in d.items() if isinstance(v, dict))
+        return out
+
     def marks(self):
         """{page: {star, tags, hidden}} set in the list of reports (the file of --marks), or {}."""
         try:
@@ -1052,6 +1082,8 @@ class Talk:
         found = self.walk_reports()
         owners, marks = self.owners(), self.marks()
         names = owner_names(owners)
+        links = self.parents()
+        id_names = {v['id']: names[t] for t, v in owners.items() if isinstance(v.get('id'), str) and v['id']}
         rows = []
         with self.cond:
             for theme, r, page, full, pl in found:
@@ -1073,11 +1105,13 @@ class Talk:
                 comments = [x['id'] for x in s.waiting_items() if any('text' in m for m in x['new'])] if s else []
                 owner = names.get(theme, '')
                 owner_id = owners.get(theme, {}).get('id', '')
+                parent = top_parent(owner_id, links, id_names) if isinstance(owner_id, str) and owner_id else ''
                 mk = marks.get(page, {})
                 tags = mk.get('tags') if isinstance(mk.get('tags'), list) else []
                 rows.append({'page': page, 'theme': theme, 'round': r, 'title': title or theme,
                              'owner': owner if isinstance(owner, str) else '',
-                             'owner_id': owner_id if isinstance(owner_id, str) else '', 'tracked': bool(r),
+                             'owner_id': owner_id if isinstance(owner_id, str) else '', 'parent': parent,
+                             'tracked': bool(r),
                              'status': read if r else '-', 'read': bool(r) and read in READ,
                              'comments': comments, 'time': t, 'lang': lang, 'place': pl.id, 'group': pl.group,
                              'star': mk.get('star') is True, 'tags': [x for x in tags if isinstance(x, str)],
@@ -1825,6 +1859,30 @@ def cmd_reports(a):
             f.write('\n')
         os.replace(tmp, path)
         print('talkpage: owner of %s: %s (%s)' % (theme, name, sid))
+    elif act == 'parent':
+        if len(args) != 3:
+            raise SystemExit('talkpage: reports parent <session id> <parent id> <parent name>')
+        sid, pid, pname = args
+        folder = d['root'] or next((pl['root'] for pl in d.get('places') or []), None)
+        if not folder:
+            raise SystemExit('talkpage: the server has no folder to write session-parents.json to')
+        path = os.path.join(folder, 'session-parents.json')
+        links = {}
+        if os.path.isfile(path):
+            with open(path, encoding='utf-8') as f:
+                try:
+                    links = json.load(f)
+                except ValueError as e:
+                    raise SystemExit('talkpage: %s is not JSON (%s); fix or remove it' % (path, e))
+            if not isinstance(links, dict):
+                raise SystemExit('talkpage: %s is not a JSON object' % path)
+        links[sid] = {'parent': pid, 'name': pname}
+        tmp = path + '.tmp'
+        with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
+            json.dump(links, f, ensure_ascii=False, indent=1, sort_keys=True)
+            f.write('\n')
+        os.replace(tmp, path)
+        print('talkpage: parent of %s: %s (%s)' % (sid, pname, pid))
     elif act in ('read', 'unread'):
         for x in tracked(args):
             status = ''
@@ -1887,7 +1945,7 @@ def main():
     s = sub.add_parser('show', help="all items of a page, and the user's fixes of its text (~ edit)")
     s.add_argument('--page')
     s = sub.add_parser('reports', help='the reports of a server run with --reports')
-    s.add_argument('action', nargs='?', default='list', choices=('list', 'owner', 'read', 'unread', 'open'))
+    s.add_argument('action', nargs='?', default='list', choices=('list', 'owner', 'parent', 'read', 'unread', 'open'))
     s.add_argument('args', nargs='*')
     s.add_argument('--owner', help='open: the pages of the themes whose owner contains this')
     for sp in sub.choices.values():                                 # --port also after the subcommand

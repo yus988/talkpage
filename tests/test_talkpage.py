@@ -473,6 +473,36 @@ class ReportsTest(unittest.TestCase):
         with open(os.path.join(self.root, 'owners.json'), encoding='utf-8') as f:
             self.assertEqual(json.load(f)['cad/widget/case-fit'], {'name': 'ケース改', 'id': 'sid-2'})
 
+    def test_parent_command(self):
+        r = self.cli('reports', 'parent', 'sid-b', 'sid-a', 'design')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.cli('reports', 'parent', 'sid-a', 'sid-top', 'top')
+        with open(os.path.join(self.root, 'session-parents.json'), encoding='utf-8') as f:
+            self.assertEqual(json.load(f), {'sid-a': {'name': 'top', 'parent': 'sid-top'},
+                                            'sid-b': {'name': 'design', 'parent': 'sid-a'}})
+        self.assertIn('reports parent', self.cli('reports', 'parent', 'x').stderr)
+        os.remove(os.path.join(self.root, 'session-parents.json'))
+
+    def test_owner_parent(self):
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root, True)
+        for t in ('design', 'board-a', 'board-b', 'solo', 'loop-a', 'loop-b'):
+            write(root, t + '/index.html', '<title>%s</title>' % t)
+        ids = {'design': 'd', 'board-a': 'a', 'board-b': 'b', 'solo': 's', 'loop-a': 'la', 'loop-b': 'lb'}
+        write(root, 'owners.json', json.dumps({t: {'name': 'n-' + t, 'id': i} for t, i in ids.items()}))
+        write(root, 'session-parents.json', json.dumps({
+            'a': {'parent': 'd', 'name': 'stored-design'},          # child of design
+            'b': {'parent': 'a', 'name': 'stored-a'},               # grandchild: the top is still design
+            'la': {'parent': 'lb', 'name': 'stored-lb'}, 'lb': {'parent': 'la', 'name': 'stored-la'}}))   # a cycle
+        got = {x['theme']: x['parent'] for x in tp.Talk(root, 0, 'en', reports=True).reports()['rows']}
+        self.assertEqual(got, {'design': '', 'board-a': 'n-design', 'board-b': 'n-design', 'solo': '',
+                               'loop-a': 'n-loop-b', 'loop-b': 'n-loop-a'})
+        # an ancestor without a theme of its own: the stored name of the link that points at it
+        self.assertEqual(tp.top_parent('x', {'x': {'parent': 'y', 'name': 'stored-y'}}, {}), 'stored-y')
+        self.assertEqual(tp.top_parent('x', {'x': {'parent': 'y', 'name': 'stored-y'}, 'y': {'parent': 'z', 'name': 'zz'}},
+                                       {}), 'zz')
+        self.assertEqual(tp.top_parent('x', {}, {}), '')
+
     def test_owner_names(self):
         owners = {'a': {'name': 'old', 'id': 's'}, 'b': {'name': 'new', 'id': 's'}, 'c': {'name': 'new', 'id': 's'},
                   'd': {'name': 'x'}, 'e': {'name': 'y', 'id': ''}, 'f': {'id': 't'}}
