@@ -309,12 +309,12 @@ sidebar marks starred rows with ★; under `--place` it groups the reports by he
   share of the way down. The hints are kept in the item's `anchor` (for a new comment at its first send, for an older
   one once its text is found). Only comments with nothing to go by are listed at the end
 - A card's head is one row: the id, a speech bubble with the number of messages (opens and closes the card), the mark
-  (New reply, AI unread, …), then "Resolve", ⤢ and "Send" at the right end ("Send" with nothing written opens the
-  card and goes to its box). The box to write in spans the card
+  (New reply, AI unread, …), then "Resolve" and ⤢ at the right end. Below, the box to write in spans the card with
+  "Send" at its bottom right, so it stays near the end of a long comment
 - An open card shows the agent's summary (`reply --summary`) and each message in full (the thread up to half the
   window's height, scrolling inside when longer). ⤢ shows the thread large in the middle of the screen (background or
-  Esc goes back); its head stays at the top while the thread scrolls, with "Resolve", ⤡ (back to the card) and "Send"
-  in the same order. A closed card in the list of comments not found shows the summary (up to 3 lines) or the first
+  Esc goes back); its head stays at the top while the thread scrolls, with "Resolve" and ⤡ (back to the card); "Send" sits
+  at the bottom right of the box, as in the card. A closed card in the list of comments not found shows the summary (up to 3 lines) or the first
   line of the last message, and opens in place when clicked
 - "Resolve" does not wake the agent and does not remove the comment: its text keeps a faint highlight and its pin
   stays, faded, and opens the card as before (so one sees it was asked there). The dock's "Hide resolved n" hides

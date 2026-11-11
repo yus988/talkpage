@@ -815,7 +815,8 @@
     var c = { id: id, card: true, scope: scope, title: title, open: false, visible: false, shown: -1, short: true };
     c.el = el('div', 'talk-ui talk-rcard');
     // one row at the top: the id, a speech bubble with the number of messages (opens and closes the card), the mark
-    // (new reply …), then resolve, ⤢ and send at the right end; the box to write in below spans the card
+    // (new reply …), then resolve and ⤢ at the right end; below, the box to write in with send at its bottom right (near
+    // the end of a long comment, not up in the head)
     var head = el('div', 'talk-rcard-head');
     c.idEl = el('span', 'talk-rcard-id', id);
     c.bub = button('talk-rcard-bub', '');
@@ -832,7 +833,7 @@
     c.expand.setAttribute('aria-label', tr('expand'));
     c.send = button('talk-send', tr('send'));
     c.send.title = tr('send.title');
-    [c.idEl, c.bub, c.mark, c.res, c.expand, c.send].forEach(function (x) { head.appendChild(x); });
+    [c.idEl, c.bub, c.mark, c.res, c.expand].forEach(function (x) { head.appendChild(x); });
     c.quote = el('div', 'talk-rcard-quote', title);
     c.sum = el('div', 'talk-rcard-sum');
     c.body = el('div', 'talk-rcard-body');
@@ -842,6 +843,7 @@
     c.ta.rows = 2;
     c.ta.placeholder = tr('comment.ph');
     form.appendChild(c.ta);
+    form.appendChild(c.send);
     [c.lines, form].forEach(function (x) { c.body.appendChild(x); });
     [head, c.quote, c.sum, c.body].forEach(function (x) { c.el.appendChild(x); });
     // the pin right of the report: a speech bubble and the number of messages; it opens and closes the card
@@ -1080,8 +1082,8 @@
     var box = el('div', 'talk-modal-box');
     box.setAttribute('role', 'dialog');
     box.setAttribute('aria-modal', 'true');
-    // the head stays at the top while the thread scrolls: the id, then resolve, back to the card and send at the right
-    // end, as in the card
+    // the head stays at the top while the thread scrolls: the id, then resolve and back to the card at the right end;
+    // send at the bottom right of the box to write in, as in the card
     var head = el('div', 'talk-modal-head');
     head.appendChild(el('span', 'talk-rcard-id', c.idEl.textContent));     // with ≈ when near its old place
     var b = { c: c, el: m, shown: -1 };
@@ -1091,7 +1093,7 @@
     x.setAttribute('aria-label', x.title);
     b.send = button('talk-send', tr('send'));
     b.send.title = tr('send.title');
-    [b.res, x, b.send].forEach(function (y) { head.appendChild(y); });
+    [b.res, x].forEach(function (y) { head.appendChild(y); });
     b.sum = el('div', 'talk-modal-sum');
     b.list = el('div', 'talk-entries talk-modal-list');
     var form = el('div', 'talk-form');
@@ -1100,6 +1102,7 @@
     b.ta.placeholder = tr('comment.ph');
     b.ta.value = c.ta.value;
     form.appendChild(b.ta);
+    form.appendChild(b.send);
     [head, el('blockquote', 'talk-modal-quote', c.title), b.sum, b.list, form]
       .forEach(function (y) { box.appendChild(y); });
     m.appendChild(box);

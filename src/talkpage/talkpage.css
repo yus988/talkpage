@@ -155,7 +155,7 @@ body { padding-bottom: 64px; }
 .talk-rcard-bub svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; }
 .talk-rcard-bub .talk-count { min-width: 0; }
 .talk-rcard-bub[aria-expanded="true"] { color: var(--talk-accent); border-color: var(--talk-accent) !important; }
-.talk-rcard-head .talk-send, .talk-modal-head .talk-send { color: var(--talk-accent); border-color: var(--talk-accent); }
+.talk-rcard .talk-form .talk-send, .talk-modal .talk-form .talk-send { color: #fff; background: var(--talk-accent); border-color: var(--talk-accent); }
 .talk-rcard .talk-form, .talk-modal .talk-form { margin-top: 4px; }
 /* a comment's pin: a speech bubble and the number of messages, small enough for the gap right of the report (it keeps
    its size when the report is zoomed); filled while the agent's reply is unread, dashed while not sent yet */
