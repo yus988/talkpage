@@ -26,6 +26,10 @@ body { padding-bottom: 64px; }
 [data-talk][data-talk-tone="ng"] { box-shadow: inset 4px 0 0 var(--talk-ng); }
 [data-talk][data-talk-tone="ask"] { box-shadow: inset 4px 0 0 var(--talk-ask); }
 [data-talk][data-talk-tone="skip"] { box-shadow: inset 4px 0 0 var(--talk-skip); }
+/* a question not answered yet: the stripe in the accent, so it is found when the page is skimmed */
+[data-talk][data-talk-ask]:not([data-talk-tone]) {
+  box-shadow: inset 4px 0 0 var(--talk-accent); border-top-left-radius: 0; border-bottom-left-radius: 0;
+}
 
 .talk-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; font-size: 13px; line-height: 1.5; }
 .talk-bar button, .talk-form button, .talk-dock button, .talk-copy-btn {
@@ -246,6 +250,16 @@ body { padding-bottom: 64px; }
 .talk-sb-split { flex: none; position: relative; z-index: 1; height: 8px; margin: -4px 0; cursor: row-resize; touch-action: none; }
 .talk-sb-split:hover { background: var(--talk-line); }
 .talk-sb-pane[hidden] + .talk-sb-split, .talk-sb-pane.talk-folded + .talk-sb-split { display: none; }
+.talk-sb-asks { flex: 0 1 auto; max-height: 34%; }       /* the questions: their own height, at most a third */
+.talk-sb-ask { display: flex; align-items: baseline; gap: 8px; padding: 2px 6px 3px 12px; border-left: 3px solid transparent; color: var(--talk-fg); text-decoration: none; }
+.talk-sb-ask:hover { background: var(--talk-user-bg); }
+.talk-sb-ask.talk-sb-askopen { font-weight: 700; border-left-color: var(--talk-accent); }
+.talk-sb-asktext { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.talk-sb-ans { flex: none; font-size: 12px; font-weight: 400; color: var(--talk-accent); white-space: nowrap; }
+.talk-sb-ans[data-tone="ok"] { color: var(--talk-ok); }
+.talk-sb-ans[data-tone="ng"] { color: var(--talk-ng); }
+.talk-sb-ans[data-tone="ask"] { color: var(--talk-ask); }
+.talk-sb-ans[data-tone="skip"] { color: var(--talk-skip); }
 .talk-sb-toc > .talk-sb-body { padding-top: 4px; border-top: 1px solid var(--talk-line); }
 .talk-sb-head, .talk-sb-ghead {
   display: flex; align-items: baseline; gap: 8px; width: 100%; text-align: left; font: inherit; color: var(--talk-fg);

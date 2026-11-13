@@ -127,6 +127,8 @@ A minimal page (see also [`sample/index.html`](sample/index.html); `talkpage ser
 | `data-talk-listing` | `<body>` | The server's list of reports: sidebar and zoom only, no state requests |
 | `data-talk-page="<key>"` | `<html>` | Another name for where the state is kept (default: the page path; for pages served by another tool's server) |
 
+An item with status buttons whose `data-talk-wake` is not `none` is a question: until a button is pressed it has a stripe in the accent colour on the left, and the sidebar lists the questions in a pane of their own (open ones bold, answered ones with the answer in its colour). A row of the list goes to the item.
+
 An item gets `data-talk-status="NG"` and `data-talk-tone="ng"` by its status (by default a coloured bar at its left;
 the page's CSS can change it).
 

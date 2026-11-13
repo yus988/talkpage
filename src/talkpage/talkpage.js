@@ -92,6 +92,11 @@
       'sb.total.title': 'Reports not marked Read (new: since this page was opened)',
       'sb.new': 'New',
       'sb.notoc': 'No headings',
+      'sb.asks': 'Questions',
+      'sb.asks.open': 'open {n}',
+      'sb.asks.done': 'all answered',
+      'sb.asks.title': 'Questions not answered yet (no button pressed)',
+      'sb.asks.none': 'open',
       'sb.submission': 'Submission',
       'sb.basis': 'Show or hide the work reports it is based on',
       'sb.based': 'submitted with {r}',
@@ -177,6 +182,11 @@
       'sb.total.title': '「読んだ」を押していないレポートの数（新: このページを開いた後に増えたもの）',
       'sb.new': '新',
       'sb.notoc': '見出しなし',
+      'sb.asks': '判断',
+      'sb.asks.open': '未回答 {n}',
+      'sb.asks.done': 'すべて回答済み',
+      'sb.asks.title': 'まだボタンを押していない判断の数',
+      'sb.asks.none': '未回答',
       'sb.submission': '提出',
       'sb.basis': '根拠にした作業用のレポートの表示の切り替え',
       'sb.based': '提出は {r}',
@@ -255,6 +265,10 @@
       states: states(up(node, 'data-talk-states')), wake: up(node, 'data-talk-wake') || '*', btns: {}
     };
     order.push(id);
+    // a question to the reader (status buttons that tell the agent): a stripe on the left until it is answered, and a
+    // row in the sidebar's list of questions. Not an item that wakes no one (data-talk-wake="none", such as Read)
+    u.ask = u.states.length > 0 && u.wake !== 'none';
+    if (u.ask) node.setAttribute('data-talk-ask', '');
     var bar = el('div', 'talk-bar');
     u.states.forEach(function (s) {
       var b = button('talk-st', s.name);
@@ -451,6 +465,7 @@
     dock.presence.title = p[1] + (presence === 'down' && downWhy ? tr('paren', { x: downWhy }) : '');
     dock.presence.setAttribute('data-p', presence);
     document.title = (n.unread ? '(' + n.unread + ') ' : '') + baseTitle;
+    paintAsks();
   }
 
   // the items of the page and the comment cards, in that order
@@ -1537,7 +1552,8 @@
     split.title = tr('sb.split');
     var grip = el('div', 'talk-sb-grip');
     grip.title = tr('sb.grip');
-    [rp.sec, split, tp.sec, grip].forEach(function (x) { sbEl.appendChild(x); });
+    var qs = order.filter(function (id) { return ui[id].ask; });
+    [rp.sec, split].concat(qs.length ? [askPane(qs).sec] : [], [tp.sec, grip]).forEach(function (x) { sbEl.appendChild(x); });
     splitter(split);
     sbBack = el('div', 'talk-ui talk-sb-back');            // a tap outside the sidebar lying over the report closes it
     sbBack.hidden = true;
@@ -1741,6 +1757,47 @@
     var avail = document.documentElement.clientWidth - x - 2 * GAP;
     if (w > 0 && avail > 0) applyZoom(avail / w, window.innerHeight / 2);
     savePrefs();
+  }
+
+  // the questions of this page (items with status buttons), in the order of the page: the ones not answered yet are
+  // bold with a stripe, the answered ones show the answer in its colour. A click goes to the item
+  var asks = null;
+  function askPane(ids) {
+    var p = pane('asks', tr('sb.asks')), count = el('span', 'talk-sb-total');
+    p.sec.classList.add('talk-sb-asks');
+    count.title = tr('sb.asks.title');
+    p.head.appendChild(count);
+    asks = { count: count, rows: ids.map(function (id) {
+      var u = ui[id], a = el('a', 'talk-sb-ask'), st = el('span', 'talk-sb-ans');
+      a.appendChild(el('span', 'talk-sb-asktext', u.title));
+      a.appendChild(st);
+      a.href = '#';
+      a.title = u.title;
+      a.addEventListener('click', function (e) {
+        e.preventDefault();
+        u.el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        u.el.classList.remove('talk-flash');
+        void u.el.offsetWidth;
+        u.el.classList.add('talk-flash');
+        if (layoutWidth() < 900) setOpen(false, false);
+      });
+      p.body.appendChild(a);
+      return { u: u, a: a, st: st };
+    }) };
+    paintAsks();
+    return p;
+  }
+  function paintAsks() {
+    if (!asks) return;
+    var open = 0;
+    asks.rows.forEach(function (r) {
+      var v = (items[r.u.id] || {}).status || '';
+      if (!v) open++;
+      r.a.classList.toggle('talk-sb-askopen', !v);
+      r.st.textContent = v || tr('sb.asks.none');
+      r.st.setAttribute('data-tone', v ? r.u.el.getAttribute('data-talk-tone') || 'ask' : '');
+    });
+    asks.count.textContent = open ? tr('sb.asks.open', { n: open }) : tr('sb.asks.done');
   }
 
   function buildToc(box) {
